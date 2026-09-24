@@ -22,6 +22,7 @@ backend/            FastAPI, Python 3.12, uv, SQLAlchemy 2 + Alembic, Pydantic v
   alembic/  tests/
 frontend/           Vite + React + TS, React Router, TanStack Query, Tailwind, Recharts
 eval/               classifier eval set and results
+scripts/setup.py    one-shot environment bootstrap (uv, .env, backend deps, build-with-exa skill)
 scripts/smoke/      provider smoke tests (phase 00)
 data/               runtime audio and chunks (gitignored)
 docs/               ARCHITECTURE.md, DECISIONS.md, phases/
@@ -29,8 +30,10 @@ docs/               ARCHITECTURE.md, DECISIONS.md, phases/
 
 ## Commands
 ```bash
+python scripts/setup.py                        # one-shot bootstrap: installs uv if missing,
+                                                 # creates .env from .env.example, uv sync's backend/
 docker compose up -d db                        # Postgres only (dev)
-cd backend && uv sync                          # install
+cd backend && uv sync                          # install (also what scripts/setup.py runs)
 uv run alembic upgrade head                    # migrate
 uv run uvicorn app.main:app --reload           # API on :8000
 uv run python -m app.cli --help                # pipeline CLI (plan, fetch, generate, ...)
@@ -45,6 +48,12 @@ docker compose up --build                      # everything
 **Secrets**
 - Keys come only from environment via `app/config.py` (pydantic-settings reading `.env`): `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `EXA_API_KEY`, optional `TYPESAFE_API_KEY` (Jev).
 - `.env` is gitignored; `.env.example` lists every variable with a placeholder. Never print, log, or commit a key. Never put a key in frontend code.
+
+**Environment setup**
+- `scripts/setup.py` is the single source of truth for "how do I get a working environment." It installs `uv` if missing, creates `.env` from `.env.example` if missing, and runs `uv sync` in `backend/` — which installs from `backend/pyproject.toml` + `backend/uv.lock`, the actual dependency manifest.
+- Never add a dependency by hand-editing `pyproject.toml` or running bare `pip install`. Add it with `uv add <package>` (or `uv add --dev <package>`) from `backend/`; this updates both `pyproject.toml` and `uv.lock` together, which is what makes `uv sync` reproducible for everyone else.
+- After adding, removing, or upgrading a dependency, re-run `python scripts/setup.py` (or `uv sync`) yourself to confirm it installs clean, and commit the updated `pyproject.toml` + `uv.lock` in the same commit as the code that needs the new dependency.
+- If a phase needs a new external tool the way phase 00 needed Exa's `build-with-exa` skill, add its bootstrap step to `scripts/setup.py` too (with a fallback if the usual installer — e.g. `npx` — isn't guaranteed to be on PATH) rather than leaving it as a one-off manual step in a phase report.
 
 **Providers and cost**
 - All provider access goes through the adapters in `app/adapters/`. Pipeline code never imports an SDK directly.
