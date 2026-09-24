@@ -13,13 +13,18 @@ class Topic(BaseModel):
 
 
 class InterestProfile(BaseModel):
-    topics: list[Topic] = Field(default_factory=list)
+    topics: list[Topic] = Field(default_factory=list, max_length=8)
     avoid: list[str] = Field(default_factory=list)
 
 
 class PlannedQuery(BaseModel):
     query: str
     topic: str
+    is_focus: bool = False
+
+
+class QueryPlan(BaseModel):
+    queries: list[PlannedQuery] = Field(default_factory=list, max_length=30)
 
 
 class RawArticle(BaseModel):

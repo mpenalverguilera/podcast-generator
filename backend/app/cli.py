@@ -1,12 +1,25 @@
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import typer
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from app.adapters.llm import get_llm
 from app.config import get_settings
 from app.db import session_scope
-from app.models import Episode, EpisodeStatus, EpisodeTrigger, PipelineStep, Preferences, User
+from app.models import (
+    Article,
+    ArticleScore,
+    Episode,
+    EpisodeStatus,
+    EpisodeTrigger,
+    PipelineStep,
+    Preferences,
+    User,
+)
+from app.pipeline.profile import extract_profile
 from app.pipeline.runner import run_episode
 
 cli = typer.Typer(help="Personal Podcast Generator pipeline CLI")
@@ -60,6 +73,40 @@ def seed_users() -> None:
         )
 
 
+@cli.command("profile")
+def profile_cmd(
+    user: str = typer.Option(..., "--user", help="Email of the user this profile is for"),
+    answers: Path = typer.Option(
+        ..., "--answers", help="Path to a JSON file of {question_key: answer_text}"
+    ),
+    save: bool = typer.Option(False, "--save", help="Write the extracted profile to preferences"),
+) -> None:
+    """Extracts a structured InterestProfile from guided-interview answers."""
+    settings = get_settings()
+    answers_data = json.loads(answers.read_text())
+    llm = get_llm(settings)
+    result, usage = extract_profile(answers_data, llm, settings)
+
+    typer.echo(result.model_dump_json(indent=2))
+    typer.echo(
+        f"cost: ${usage.cost_usd:.4f} ({usage.units_in} in / {usage.units_out} out tokens, "
+        f"{usage.latency_ms}ms)"
+    )
+
+    if save:
+        with session_scope() as db:
+            owner = db.scalar(select(User).where(User.email == user))
+            if owner is None:
+                typer.echo(f"no user with email {user!r}; run seed-users first", err=True)
+                raise typer.Exit(code=1)
+            prefs = db.get(Preferences, owner.id)
+            if prefs is None:
+                typer.echo(f"user {user!r} has no preferences row; run seed-users first", err=True)
+                raise typer.Exit(code=1)
+            prefs.interest_profile = result.model_dump()
+            typer.echo(f"saved profile for {user}")
+
+
 @cli.command("new-episode")
 def new_episode(
     user: str = typer.Option(..., "--user", help="Email of the user to generate for"),
@@ -92,6 +139,61 @@ def new_episode(
         db.add(episode)
         db.flush()
         typer.echo(f"created episode {episode.id} for {user}")
+
+
+@cli.command("plan")
+def plan_cmd(episode_id: int = typer.Argument(..., help="Episode id to plan queries for")) -> None:
+    episode = run_episode(episode_id, stop_after="planning")
+    if episode.status == EpisodeStatus.FAILED:
+        typer.echo(
+            f"episode {episode_id} failed at {episode.failed_stage}: {episode.error}", err=True
+        )
+        raise typer.Exit(code=1)
+    queries = episode.planned_queries or []
+    typer.echo(f"episode {episode_id} planned {len(queries)} queries:")
+    for q in queries:
+        flag = " [focus]" if q.get("is_focus") else ""
+        typer.echo(f"  [{q['topic']}] {q['query']}{flag}")
+
+
+@cli.command("fetch")
+def fetch_cmd(
+    episode_id: int = typer.Argument(..., help="Episode id to fetch candidates for"),
+) -> None:
+    episode = run_episode(episode_id, stop_after="fetching")
+    if episode.status == EpisodeStatus.FAILED:
+        typer.echo(
+            f"episode {episode_id} failed at {episode.failed_stage}: {episode.error}", err=True
+        )
+        raise typer.Exit(code=1)
+    with session_scope() as db:
+        count = db.scalar(
+            select(func.count(func.distinct(ArticleScore.article_id))).where(
+                ArticleScore.episode_id == episode_id
+            )
+        )
+    typer.echo(f"episode {episode_id} fetched {count} unique candidate articles")
+    typer.echo(f"run `candidates {episode_id}` to see them")
+
+
+@cli.command("candidates")
+def candidates_cmd(
+    episode_id: int = typer.Argument(..., help="Episode id to list candidates for"),
+) -> None:
+    with session_scope() as db:
+        rows = db.execute(
+            select(ArticleScore.topic, Article.outlet, Article.published_at, Article.title)
+            .join(Article, Article.id == ArticleScore.article_id)
+            .where(ArticleScore.episode_id == episode_id)
+            .order_by(ArticleScore.topic, Article.published_at.desc().nullslast())
+        ).all()
+    if not rows:
+        typer.echo(f"no candidates for episode {episode_id}; run `fetch {episode_id}` first")
+        raise typer.Exit(code=1)
+    typer.echo(f"{'topic':<20} {'outlet':<24} {'date':<12} title")
+    for topic, outlet, published_at, title in rows:
+        date_str = published_at.date().isoformat() if published_at else "?"
+        typer.echo(f"{(topic or ''):<20} {(outlet or ''):<24} {date_str:<12} {title or ''}")
 
 
 @cli.command("run")
