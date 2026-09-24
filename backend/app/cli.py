@@ -21,6 +21,8 @@ from app.models import (
 )
 from app.pipeline.profile import extract_profile
 from app.pipeline.runner import run_episode
+from app.pipeline.script import strip_audio_tags
+from app.schemas import Script
 
 cli = typer.Typer(help="Personal Podcast Generator pipeline CLI")
 _pwd_context = CryptContext(schemes=["bcrypt"])
@@ -107,6 +109,37 @@ def profile_cmd(
             typer.echo(f"saved profile for {user}")
 
 
+def _create_episode(db, user: str, focus: str | None, minutes: int | None) -> int:
+    """Shared by `new-episode` and `generate`: resolves the window start from
+    the user's last ready episode (or 7 days back for a first episode) and the
+    target length from the override or the user's saved preference."""
+    owner = db.scalar(select(User).where(User.email == user))
+    if owner is None:
+        typer.echo(f"no user with email {user!r}; run seed-users first", err=True)
+        raise typer.Exit(code=1)
+
+    last_ready = db.scalar(
+        select(Episode)
+        .where(Episode.user_id == owner.id, Episode.status == EpisodeStatus.READY)
+        .order_by(Episode.ready_at.desc())
+        .limit(1)
+    )
+    window_start = last_ready.ready_at if last_ready else datetime.now(UTC) - timedelta(days=7)
+    target_minutes = minutes or (owner.preferences.target_minutes if owner.preferences else 6)
+
+    episode = Episode(
+        user_id=owner.id,
+        status=EpisodeStatus.PENDING,
+        trigger=EpisodeTrigger.MANUAL,
+        focus_request=focus,
+        window_start=window_start,
+        target_minutes=target_minutes,
+    )
+    db.add(episode)
+    db.flush()
+    return episode.id
+
+
 @cli.command("new-episode")
 def new_episode(
     user: str = typer.Option(..., "--user", help="Email of the user to generate for"),
@@ -114,31 +147,8 @@ def new_episode(
     minutes: int | None = typer.Option(None, "--minutes", help="Target length override"),
 ) -> None:
     with session_scope() as db:
-        owner = db.scalar(select(User).where(User.email == user))
-        if owner is None:
-            typer.echo(f"no user with email {user!r}; run seed-users first", err=True)
-            raise typer.Exit(code=1)
-
-        last_ready = db.scalar(
-            select(Episode)
-            .where(Episode.user_id == owner.id, Episode.status == EpisodeStatus.READY)
-            .order_by(Episode.ready_at.desc())
-            .limit(1)
-        )
-        window_start = last_ready.ready_at if last_ready else datetime.now(UTC) - timedelta(days=7)
-        target_minutes = minutes or (owner.preferences.target_minutes if owner.preferences else 6)
-
-        episode = Episode(
-            user_id=owner.id,
-            status=EpisodeStatus.PENDING,
-            trigger=EpisodeTrigger.MANUAL,
-            focus_request=focus,
-            window_start=window_start,
-            target_minutes=target_minutes,
-        )
-        db.add(episode)
-        db.flush()
-        typer.echo(f"created episode {episode.id} for {user}")
+        episode_id = _create_episode(db, user, focus, minutes)
+        typer.echo(f"created episode {episode_id} for {user}")
 
 
 @cli.command("plan")
@@ -194,6 +204,52 @@ def candidates_cmd(
     for topic, outlet, published_at, title in rows:
         date_str = published_at.date().isoformat() if published_at else "?"
         typer.echo(f"{(topic or ''):<20} {(outlet or ''):<24} {date_str:<12} {title or ''}")
+
+
+@cli.command("generate")
+def generate_cmd(
+    user: str = typer.Option(..., "--user", help="Email of the user to generate for"),
+    focus: str | None = typer.Option(None, "--focus", help="Optional focus request"),
+    minutes: int | None = typer.Option(None, "--minutes", help="Target length override"),
+    tts: str | None = typer.Option(None, "--tts", help="Override TTS provider, e.g. 'fake'"),
+    stop_after: str | None = typer.Option(None, "--stop-after", help="Stage name to stop after"),
+) -> None:
+    """Creates an episode and runs the whole pipeline (plan -> ... -> assemble)."""
+    with session_scope() as db:
+        episode_id = _create_episode(db, user, focus, minutes)
+
+    episode = run_episode(episode_id, stop_after=stop_after, tts_override=tts)
+    if episode.status == EpisodeStatus.FAILED:
+        typer.echo(
+            f"episode {episode_id} failed at {episode.failed_stage}: {episode.error}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"episode {episode_id} status: {episode.status.value}")
+    if episode.status == EpisodeStatus.READY:
+        typer.echo(f"title: {episode.title}")
+        typer.echo(f"audio: {episode.audio_path}")
+        typer.echo(f"duration: {episode.duration_s:.1f}s")
+
+
+@cli.command("transcript")
+def transcript_cmd(episode_id: int = typer.Argument(..., help="Episode id to print")) -> None:
+    with session_scope() as db:
+        episode = db.get(Episode, episode_id)
+        if episode is None or not episode.script:
+            typer.echo(f"no script for episode {episode_id}", err=True)
+            raise typer.Exit(code=1)
+        prefs = db.get(Preferences, episode.user_id)
+        names = {
+            "host_a": (prefs.host_a or {}).get("name", "Alex") if prefs else "Alex",
+            "host_b": (prefs.host_b or {}).get("name", "Sam") if prefs else "Sam",
+        }
+        script = Script.model_validate(episode.script)
+
+    typer.echo(f"{script.title}\n{script.summary}\n")
+    for section in script.sections:
+        for turn in section.turns:
+            typer.echo(f"{names[turn.speaker]}: {strip_audio_tags(turn.text)}")
 
 
 @cli.command("run")

@@ -8,17 +8,24 @@ if TYPE_CHECKING:
 
 class FakeClassifier:
     """Deterministic Classifier for tests/CLI iteration: always returns a
-    mid-range score, zero cost."""
+    confident (not borderline) score, zero cost. 0.8 x 0.8 = 0.64 clears
+    rank.py's 0.3 selection threshold even after recency decay -- a 0.5/0.5
+    "midpoint" default would silently fail every fake-pipeline test, since
+    0.5 x 0.5 = 0.25 never clears it."""
 
     def score(
-        self, article: "Article", profile: InterestProfile, recent_headlines: list[str]
+        self,
+        article: "Article",
+        profile: InterestProfile,
+        topic: str,
+        recent_headlines: list[str],
     ) -> tuple[ArticleScoreResult, Usage]:
         result = ArticleScoreResult(
-            topic=profile.topics[0].name if profile.topics else "general",
-            relevance=0.5,
-            newsworthy=0.5,
+            topic=topic,
+            relevance=0.8,
+            newsworthy=0.8,
             already_covered=False,
-            score=0.5,
+            score=0.64,
         )
         usage = Usage(provider="fake", latency_ms=0, usage_source="fake")
         return result, usage

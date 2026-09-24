@@ -174,8 +174,11 @@ class LLM(Protocol):                   # OpenAILLM, FakeLLM
                    reasoning: str) -> tuple[BaseModel, Usage]: ...
 
 class Classifier(Protocol):            # LLMClassifier (wraps LLM), JevClassifier, FakeClassifier
-    def score(self, article: Article, profile: InterestProfile,
+    def score(self, article: Article, profile: InterestProfile, topic: str,
               recent_headlines: list[str]) -> tuple[ArticleScore, Usage]: ...
+    # `topic` (added phase 03, D-23): fetch already tags each candidate with the
+    # one topic that found it (D-21); the classifier scores against that
+    # specific topic rather than re-picking one from the whole profile.
 
 class TTS(Protocol):                   # ElevenLabsDialogueTTS, FakeTTS (silence of the right length)
     def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]: ...

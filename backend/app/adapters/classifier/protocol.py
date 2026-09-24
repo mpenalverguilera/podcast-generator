@@ -10,7 +10,17 @@ class Classifier(Protocol):
     # Note the asymmetry: `article` is the persisted ORM row (app.models.Article)
     # since classification runs against stored/fetched articles, while
     # `profile` is the Pydantic InterestProfile parsed out of
-    # preferences.interest_profile JSONB. This matches ARCHITECTURE §6 exactly.
+    # preferences.interest_profile JSONB.
+    #
+    # `topic` is a deviation from ARCHITECTURE §6's literal signature (logged in
+    # docs/DECISIONS.md): fetch already tags each `article_scores` row with the
+    # one topic that found it (one row per matching topic, D-21), so ranking
+    # needs to score an article against that *specific* topic, not have the
+    # classifier re-guess which of the profile's topics is best.
     def score(
-        self, article: "Article", profile: InterestProfile, recent_headlines: list[str]
+        self,
+        article: "Article",
+        profile: InterestProfile,
+        topic: str,
+        recent_headlines: list[str],
     ) -> tuple[ArticleScoreResult, Usage]: ...

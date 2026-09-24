@@ -1,8 +1,12 @@
+import re
 import time
 
 from pydantic import BaseModel
 
 from app.schemas import RenderedPrompt, Usage
+
+_SHORT_ID_RE = re.compile(r"\[(a\d+)\]")
+_FAKE_SENTENCE = "This is a fake sentence for testing scripts. "
 
 # Canned payloads keyed by schema class name, for schemas whose all-default
 # construction wouldn't produce a useful fixture. Phases 02-04 add entries here
@@ -31,6 +35,13 @@ _REGISTRY: dict[str, dict] = {
         ],
         "avoid": ["celebrity gossip"],
     },
+    "ArticleScoreResult": {
+        "topic": "general",
+        "relevance": 0.8,
+        "newsworthy": 0.8,
+        "already_covered": False,
+        "score": 0.64,
+    },
     "QueryPlan": {
         "queries": [
             {
@@ -58,6 +69,54 @@ _REGISTRY: dict[str, dict] = {
 }
 
 
+def _fake_script(prompt_text: str) -> dict:
+    """Script can't be a static _REGISTRY fixture: its source_ids must be a
+    subset of the short article ids (e.g. "a12") that script.py generated for
+    *this* episode's real, DB-assigned article ids, which a canned fixture
+    can't predict. Instead, pull the ids straight out of the rendered prompt's
+    `[aNN]` article block and build a script around exactly those -- still
+    fully deterministic for a given prompt.
+
+    Word count is calibrated (8-word sentence unit x the multipliers below) to
+    land inside the +-15% budget around the 6-minute/900-word default this
+    project's fake-adapter tests use: intro 64 + 168*len(ids) + outro 40.
+    """
+    ids = _SHORT_ID_RE.findall(prompt_text) or ["a0"]
+    sections = [
+        {
+            "kind": "intro",
+            "story_id": None,
+            "source_ids": [],
+            "turns": [
+                {"speaker": "host_a", "text": _FAKE_SENTENCE * 4},
+                {"speaker": "host_b", "text": _FAKE_SENTENCE * 4},
+            ],
+        }
+    ]
+    for i, sid in enumerate(ids):
+        sections.append(
+            {
+                "kind": "story",
+                "story_id": f"s{i + 1}",
+                "source_ids": [sid],
+                "turns": [
+                    {"speaker": "host_a", "text": _FAKE_SENTENCE * 7},
+                    {"speaker": "host_b", "text": _FAKE_SENTENCE * 7},
+                    {"speaker": "host_a", "text": _FAKE_SENTENCE * 7},
+                ],
+            }
+        )
+    sections.append(
+        {
+            "kind": "outro",
+            "story_id": None,
+            "source_ids": [],
+            "turns": [{"speaker": "host_b", "text": _FAKE_SENTENCE * 5}],
+        }
+    )
+    return {"title": "Fake Episode", "summary": "A fake summary for testing.", "sections": sections}
+
+
 class FakeLLM:
     """Deterministic LLM for tests/CLI iteration. Never fabricates data for a
     schema nobody's told it how to fake: falls back to zero-arg construction
@@ -68,7 +127,9 @@ class FakeLLM:
     ) -> tuple[BaseModel, Usage]:
         start = time.monotonic()
         name = schema.__name__
-        if name in _REGISTRY:
+        if name == "Script":
+            parsed = schema.model_validate(_fake_script(prompt.text))
+        elif name in _REGISTRY:
             parsed = schema.model_validate(_REGISTRY[name])
         else:
             try:
