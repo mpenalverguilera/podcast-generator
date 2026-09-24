@@ -37,6 +37,7 @@ cd backend && uv sync                          # install (also what scripts/setu
 uv run alembic upgrade head                    # migrate
 uv run uvicorn app.main:app --reload           # API on :8000
 uv run python -m app.cli --help                # pipeline CLI (plan, fetch, generate, ...)
+LOG_LEVEL=DEBUG uv run python -m app.cli generate --user demo@example.com   # verbose terminal logs
 uv run pytest -q                               # tests (never hit real APIs)
 uv run ruff check . && uv run ruff format .    # lint/format
 uv run --project backend python scripts/smoke/<name>.py   # provider smoke tests, run from repo root

@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from sqlalchemy import func, select
 from app.adapters.llm import get_llm
 from app.config import get_settings
 from app.db import session_scope
+from app.logging_setup import configure_logging
 from app.models import (
     Article,
     ArticleScore,
@@ -26,6 +28,16 @@ from app.schemas import Script
 
 cli = typer.Typer(help="Personal Podcast Generator pipeline CLI")
 _pwd_context = CryptContext(schemes=["bcrypt"])
+logger = logging.getLogger(__name__)
+
+
+@cli.callback()
+def _main(ctx: typer.Context) -> None:
+    configure_logging(get_settings().log_level)
+    if ctx.invoked_subcommand:
+        # Command name only -- never arguments, which can carry emails or
+        # (via --answers file paths, --focus text) other user-entered data.
+        logger.info("cli: %s", ctx.invoked_subcommand)
 
 
 def _create_user_if_missing(
@@ -33,9 +45,11 @@ def _create_user_if_missing(
 ) -> None:
     existing = db.scalar(select(User).where(User.email == email))
     if existing:
+        logger.info("user %s already exists (id=%s), skipping", email, existing.id)
         typer.echo(f"user {email} already exists (id={existing.id}), skipping")
         return
 
+    logger.info("creating user %s (admin=%s, synthetic=%s)", email, is_admin, is_synthetic)
     settings = get_settings()
     user = User(
         email=email,
@@ -100,6 +114,7 @@ def profile_cmd(
     settings = get_settings()
     answers_data = json.loads(answers.read_text())
     llm = get_llm(settings)
+    logger.info("extracting profile for %s from %s", user, answers)
     result, usage = extract_profile(answers_data, llm, settings)
 
     typer.echo(result.model_dump_json(indent=2))
@@ -119,6 +134,7 @@ def profile_cmd(
                 typer.echo(f"user {user!r} has no preferences row; run seed-users first", err=True)
                 raise typer.Exit(code=1)
             prefs.interest_profile = result.model_dump()
+            logger.info("saved profile for %s", user)
             typer.echo(f"saved profile for {user}")
 
 
@@ -150,6 +166,13 @@ def _create_episode(db, user: str, focus: str | None, minutes: int | None) -> in
     )
     db.add(episode)
     db.flush()
+    logger.info(
+        "created episode %s for %s (window_start=%s, target_minutes=%s)",
+        episode.id,
+        user,
+        window_start.date(),
+        target_minutes,
+    )
     return episode.id
 
 
