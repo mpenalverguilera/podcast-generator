@@ -63,6 +63,7 @@ docker compose up --build                      # everything
 - Tests use fake adapters only. Real calls happen only through the CLI or the running app.
 - Respect the guardrails `MAX_TTS_CHARS_PER_EPISODE` and `DAILY_SPEND_CAP_USD`. When iterating, use `--minutes 1`, `--tts fake` or `--stop-after scripting` before spending on full TTS runs.
 - Model IDs, prices and voice IDs live in config / `pricing.py`, never inline.
+- `pipeline_steps.units_in` is always the provider's exact count (OpenAI tokens, Exa's own `costDollars`, ElevenLabs' `character-cost` response header). `cost_usd` is exact for Exa/OpenAI but an estimate for ElevenLabs (`units_in × ELEVENLABS_USD_PER_1K_CHARS`, a config default since the real plan price isn't visible with this key) — flag it with `cost_is_estimate` on the row and label it as an estimate anywhere it's shown (dashboard, `solution.md`). See `docs/DECISIONS.md` D-12.
 
 **Exa (from Exa's official guidance — see the skill)**
 - `/search`: `query`, `type: "auto"`, `contents: {"highlights": true}`, plus `startPublishedDate` for the episode window. Do not add `category`, `numResults`, domain filters or `maxAgeHours`.

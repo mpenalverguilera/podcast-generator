@@ -38,19 +38,23 @@ xi-api-key: $ELEVENLABS_API_KEY
 Python SDK, confirmed in phase 00 against `elevenlabs` SDK 2.69.0 — exactly the expected shape,
 **except the client does not read `ELEVENLABS_API_KEY` from the environment automatically; `api_key`
 must be passed explicitly** (an unauthenticated client raises 401 "Neither authorization header nor
-xi-api-key received"):
+xi-api-key received"). Use `with_raw_response`, not plain `.convert()` — see Adapter contract below
+for why:
 ```python
 from elevenlabs.client import ElevenLabs
 
 client = ElevenLabs(api_key=settings.elevenlabs_api_key)   # required kwarg, not auto-read from env
-audio_iter = client.text_to_dialogue.convert(
+with client.text_to_dialogue.with_raw_response.convert(
     inputs=[{"text": t.text, "voice_id": t.voice_id} for t in turns],
     model_id=settings.elevenlabs_model,
     output_format=settings.elevenlabs_output_format,
     seed=seed,
-)
-audio_bytes = b"".join(audio_iter)
+) as resp:
+    headers = resp.headers                  # dict[str, str]; already a dict, no cast needed
+    audio_bytes = b"".join(resp.data)
 ```
+`with_raw_response.convert(...)` is `@contextlib.contextmanager`-decorated in this SDK version, so
+the `with ... as resp:` form is required (not optional sugar).
 
 ## Chunking (pipeline, not adapter)
 1. Walk script sections in order (intro, stories, outro).
@@ -64,7 +68,24 @@ audio_bytes = b"".join(audio_iter)
 class TTS(Protocol):
     def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]: ...
 ```
-`Usage.units_in` = characters sent (including tags). `FakeTTS` returns silence of ~(characters / 15) seconds so assembly and duration logic can be tested for free.
+Confirmed live in phase 00: a successful `text_to_dialogue` response carries a **`character-cost`**
+response header equal to the exact number of characters billed (tags included — a 36-character
+2-turn call returned `character-cost: 36`), plus a **`request-id`** header and a bonus
+`tts-latency-ms`. The response body is only the audio, so this is the *only* way to get the
+provider's own billed number rather than estimating it — use it:
+- `Usage.units_in = int(headers["character-cost"])`, `usage_source="header"` on the `pipeline_steps` row.
+- Store `headers["request-id"]` on the row too, for support/debugging.
+- If the header is ever missing (defensive fallback only — it was present on every phase 00 call):
+  `Usage.units_in = sum(len(t.text) for t in turns)` (tags included), `usage_source="estimated"`.
+- Dollar cost either way = `units_in × ELEVENLABS_USD_PER_1K_CHARS / 1000` from `pricing.py`.
+  `ELEVENLABS_USD_PER_1K_CHARS` (`.env.example`, default `0.11`) is an **estimate** derived from the
+  public ~$0.10/minute v3 price at ~900 characters/spoken-minute (150 words × ~6 chars) — the actual
+  per-character price isn't visible with this scoped test key (see Quota and guardrails). Set
+  `cost_is_estimate=true` on the `pipeline_steps` row for every ElevenLabs call (Exa/OpenAI rows are
+  `false` — their costs are exact); show it as an estimate anywhere it's displayed (dashboard,
+  `solution.md`). See `docs/DECISIONS.md` D-12.
+
+`FakeTTS` returns silence of ~(characters / 15) seconds so assembly and duration logic can be tested for free; it can set `usage_source="fake"` and skip the header entirely.
 
 ## Voices
 - Phase 00 picked two premade voices that contrast clearly and sound natural on v3: **Antoni** (`ErXwobaYiN019PkySvjV`, warm lower voice, host_a/Alex) and **Rachel** (`21m00Tcm4TlvDq8ikWAM`, calm voice, host_b/Sam). Stored in `DEFAULT_VOICE_HOST_A/B`. Chosen from the fallback premade pool since this key cannot list the account's own voices (see the scope note above).
@@ -76,5 +97,6 @@ class TTS(Protocol):
 - Confirmed in phase 00: `output_format="pcm_44100"` is allowed on this plan. Request PCM per chunk and encode MP3 once at the end to avoid double lossy encoding.
 
 ## Quota and guardrails
-- Phase 00 could not read the account's character quota: `client.user.subscription.get()` (`GET /v1/user/subscription`) 401s on this key ("missing the permission user_read"). No quota number is available for this test account; `MAX_TTS_CHARS_PER_EPISODE` and `DAILY_SPEND_CAP_USD` are the only enforced limits.
+- Phase 00 could not read the account's character quota: `client.user.subscription.get()` (`GET /v1/user/subscription`) 401s on this key ("missing the permission user_read"). No total-quota number is available for this test account.
+- What *is* available: every call's own `character-cost` response header (see Adapter contract). Summing that column on `pipeline_steps` gives a running "characters used so far" total for this project — not the account's total quota, but the number that actually matters for `MAX_TTS_CHARS_PER_EPISODE`/`DAILY_SPEND_CAP_USD` enforcement.
 - Never exceed `MAX_TTS_CHARS_PER_EPISODE`. Iterate with `--minutes 1` or `--tts fake`; save full-length runs for final takes.

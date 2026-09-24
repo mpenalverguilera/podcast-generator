@@ -24,8 +24,11 @@ and fake implementations, a pipeline runner that moves a fake episode through ev
 4. **Schemas** `app/schemas.py`: Pydantic models shared by pipeline and API: `InterestProfile`, `Topic`,
    `PlannedQuery`, `RawArticle`, `ContentResult`, `ArticleScore`, `Script`, `Section`, `Turn`, `Usage`.
    `Script` matches ARCHITECTURE §5.5 exactly.
-5. **Pricing** `app/pricing.py`: per-model token prices, ElevenLabs cost per 1k characters (from phase 00
-   findings or a clearly marked estimate), function `cost_for(provider, model, units_in, units_out)`.
+5. **Pricing** `app/pricing.py`: per-model token prices; `ELEVENLABS_USD_PER_1K_CHARS` (config, `.env.example`,
+   default 0.11 — an estimate, see D-12) for ElevenLabs; function `cost_for(provider, model, units_in, units_out)`
+   returning `(cost_usd, cost_is_estimate)` — `cost_is_estimate=True` only for ElevenLabs, since its `units_in`
+   is exact (the `character-cost` response header) but the $/character rate is not. `pipeline_steps` needs a
+   `cost_is_estimate` boolean column (ARCHITECTURE §7).
 6. **Adapters** `app/adapters/{search,llm,classifier,tts}/` each with `protocol.py`, real implementation,
    `fake.py`, and a `get_<kind>()` factory reading config. Real implementations follow the skills exactly.
    Fakes are deterministic (fixtures from phase 00 for search; canned JSON for LLM keyed by schema type;

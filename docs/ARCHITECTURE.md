@@ -154,7 +154,7 @@ pending → planning → fetching → ranking → extracting → scripting → v
 - Store duration and path. Mark `ready`; emit `episode_generated`.
 
 ### 5.8 Every provider call records
-`pipeline_steps`: episode_id, stage, status, provider, model, units_in, units_out (tokens or characters), cost_usd, latency_ms, started_at, finished_at, error. This one table feeds every operational metric. Exa returns its own `costDollars`; OpenAI and ElevenLabs costs are computed from `app/pricing.py`.
+`pipeline_steps`: episode_id, stage, status, provider, model, units_in, units_out (tokens or characters), cost_usd, cost_is_estimate, latency_ms, started_at, finished_at, error. This one table feeds every operational metric. Exa returns its own `costDollars` (exact); OpenAI cost is exact token counts × published prices; ElevenLabs `units_in` is exact (the `character-cost` response header, confirmed in phase 00 — see D-12), but `cost_usd` is `units_in × ELEVENLABS_USD_PER_1K_CHARS`, a config estimate, since the real plan price isn't visible with this key. `cost_is_estimate` is `false` for Exa/OpenAI rows, `true` for ElevenLabs rows. All computed in `app/pricing.py`.
 
 ### 5.9 Cost guardrails
 - `MAX_TTS_CHARS_PER_EPISODE` (default 12,000) and `DAILY_SPEND_CAP_USD` (default 5): the runner refuses to start a stage that would exceed them.
@@ -200,7 +200,7 @@ episodes         id, user_id, status, failed_stage, error, trigger (schedule|man
                  title, summary, audio_path, duration_s, is_synthetic, created_at, ready_at
 episode_items    episode_id, article_id, position, story_id
 pipeline_steps   id, episode_id, stage, status, provider, model, units_in, units_out,
-                 cost_usd, latency_ms, started_at, finished_at, error
+                 cost_usd, cost_is_estimate, latency_ms, started_at, finished_at, error
 events           id, user_id, episode_id, type, payload JSONB, is_synthetic, created_at
                  (login, profile_updated, settings_changed, generate_clicked, play_started,
                   play_progress, play_completed, episode_rated)
@@ -242,7 +242,7 @@ GET  /admin/metrics?from&to&include_synthetic   admin only
 
 ## 11. Dashboard metrics
 - **Product:** DAU/WAU, episodes per day, listen-through rate (completed / started), average % listened, 7-day retention, top topics, rating ratio, focus-request usage rate.
-- **Operations:** generation time p50/p95 per stage, failure rate per stage, cost per episode by provider (Exa / OpenAI / ElevenLabs), cost per listened minute.
+- **Operations:** generation time p50/p95 per stage, failure rate per stage, cost per episode by provider (Exa / OpenAI / ElevenLabs; the ElevenLabs slice is a `cost_is_estimate=true` estimate, labelled as such — characters are the exact metric, dollars are not, see D-12), cost per listened minute.
 - **Quality:** classifier comparison (agreement, accuracy on the labeled set, latency, cost), grounding-check flag rate, prompt version vs rating.
 
 ## 12. Deployment

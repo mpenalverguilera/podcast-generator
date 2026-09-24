@@ -16,7 +16,10 @@ we mix real pipeline data with clearly flagged synthetic data.
    - product: DAU, WAU, new users/day, episodes/day (manual vs scheduled), listen-through rate, avg % listened,
      7-day retention cohort table, top topics, 👍 ratio, focus-request usage rate;
    - operations: per-stage p50/p95 latency, failure rate per stage, cost per episode by provider (daily),
-     cost per listened minute, total spend in range;
+     cost per listened minute, total spend in range. ElevenLabs cost rows carry `cost_is_estimate=true`
+     (D-12) — the cost chart/tile must visibly label the $ figure as an estimate wherever ElevenLabs
+     contributes to it; characters (`units_in`) are the exact number if a chart wants an honest metric
+     instead;
    - quality: latest classifier eval table (phase 04), grounding flags initial vs final (avg), rating by
      script prompt version.
    Compute in SQL where reasonable; keep each metric a small function with a test on a tiny fixture.
