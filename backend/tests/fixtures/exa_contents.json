@@ -1,0 +1,66 @@
+{
+  "results": [
+    {
+      "url": "https://techcrunch.com/2026/09/23/chatgpt-mobile-app-gets-voice-based-agentic-features/",
+      "id": "https://techcrunch.com/2026/09/23/chatgpt-mobile-app-gets-voice-based-agentic-features/",
+      "title": "ChatGPT mobile app gets voice-based agentic features | TechCrunch",
+      "score": null,
+      "published_date": "2026-09-23T17:00:00.000Z",
+      "author": "Ivan Mehta",
+      "image": "https://techcrunch.com/wp-content/uploads/2026/09/openai-getty.jpg?resize=1200,800",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": "ChatGPT mobile app gets voice-based agentic features | TechCrunch\n\nPosted:\n\n10:00 AM PDT \u00b7 September 23, 2026\n\nImage Credits: Samuel Boivin/NurPhoto / Getty Images\n\n- Ivan Mehta\n\n# ChatGPT mobile app gets voice-based agentic features\n\nOpenAI announced on Wednesday that it is bringing voice-based agentic features to mobile, allowing users to trigger workflows like drafting documents or summarizing emails. \n\nPlus and Pro users will be able to use the Work tab on their phone to create a document, draft an email, or summarize Slack messages, for instance. These subscribers can do things like build sites, create presentations, use the cloud browser, and also access other areas like finances in ChatGPT. Free and Go users, meanwhile, will get to work with plugins and connected apps.\n\nOpenAI said ChatGPT\u2019s voice conversations will have richer text output. Plus, users will be able to switch between text and voice easily. They can also start working on a conversation on the go and resume it on desktop.\n\nThe feature arrives as an increasing number of users are turning to voice to issue commands to AI assistants for complex tasks.\n\nIn July, OpenAI launched its new conversational model GPT-Live, and later the company i ntegrated it with the desktop app to let users use their voice to complete tasks in the Work tab or build apps in the Codex tab. The new rollout brings similar capabilities to the mobile app.\n\nRecently, Anthropic made the handoff between mobile and desktop easier and also merged its Cowork and Chat interface. But OpenAI is still keeping chat and workspaces separate.",
+      "summary": null,
+      "highlights": null,
+      "highlight_scores": null
+    },
+    {
+      "url": "https://www.theverge.com/ai-artificial-intelligence/999540/you-can-now-summon-chatgpt-voice-from-your-phone",
+      "id": "https://www.theverge.com/ai-artificial-intelligence/999540/you-can-now-summon-chatgpt-voice-from-your-phone",
+      "title": "You can now command ChatGPT Voice to do more things from your phone. | The Verge",
+      "score": null,
+      "published_date": "2026-09-23T18:35:54.000Z",
+      "author": "Emma Roth",
+      "image": "https://platform.theverge.com/wp-content/uploads/sites/2/2026/08/STK155_OPEN_AI_CVirginia_C-1.jpg?quality=90&strip=all&crop=0%2C10.732984293194%2C100%2C78.534031413613&w=1200",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": "You can now command ChatGPT Voice to do more things from your phone. | The Verge\n\nPosted Sep 23, 2026 at 6:35 PM UTC\n\nEmma Roth\n\nYou can now command ChatGPT Voice to do more things from your phone.\n\nAfter launching its upgraded voice mode on desktop, OpenAI is bringing ChatGPT Voice\u2019s agentic capabilities to its mobile app. With the update, you use your voice to ask ChatGPT to perform tasks across connected apps \u2014 like checking your email or summarizing a file in Google Drive \u2014 from your phone or CarPlay.\n\n- Emma Roth\n\nEmma Roth\n\nNews Writer\n\nPosts from this author will be added to your daily email digest and your homepage feed.\n\nFollow\n\nSee All by Emma Roth\n- AI\n- News\n- OpenAI",
+      "summary": null,
+      "highlights": null,
+      "highlight_scores": null
+    }
+  ],
+  "resolved_search_type": null,
+  "auto_date": null,
+  "context": null,
+  "output": null,
+  "statuses": [
+    {
+      "id": "https://techcrunch.com/2026/09/23/chatgpt-mobile-app-gets-voice-based-agentic-features/",
+      "status": "success",
+      "source": "cached"
+    },
+    {
+      "id": "https://www.theverge.com/ai-artificial-intelligence/999540/you-can-now-summon-chatgpt-voice-from-your-phone",
+      "status": "success",
+      "source": "cached"
+    }
+  ],
+  "cost_dollars": {
+    "total": 0.002,
+    "search": null,
+    "contents": {
+      "text": 0.002
+    }
+  },
+  "search_time": 37.35258900001645
+}

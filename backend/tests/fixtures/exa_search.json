@@ -1,0 +1,227 @@
+{
+  "results": [
+    {
+      "url": "https://techcrunch.com/2026/09/23/chatgpt-mobile-app-gets-voice-based-agentic-features/",
+      "id": "https://techcrunch.com/2026/09/23/chatgpt-mobile-app-gets-voice-based-agentic-features/",
+      "title": "ChatGPT mobile app gets voice-based agentic features | TechCrunch",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Ivan Mehta",
+      "image": "https://techcrunch.com/wp-content/uploads/2026/09/openai-getty.jpg?resize=1200,800",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "ChatGPT mobile app gets voice-based agentic features | TechCrunch\n...\n# ChatGPT mobile app gets voice-based agentic features\n...\nOpenAI announced on Wednesday that it is bringing voice-based agentic features to mobile, allowing users to trigger workflows like drafting documents or summarizing emails.\n...\nPlus and Pro users will be able to use the Work tab on their phone to create a document, draft an email, or summarize Slack messages, for instance. These subscribers can do things like build sites, create presentations, use the cloud browser, and also access other areas like finances in ChatGPT. Free and Go users, meanwhile, will get to work with plugins and connected apps.\n...\nOpenAI said ChatGPT\u2019s voice conversations will have richer text output. Plus, users will be able to switch between text and voice easily. They can also start working on a conversation on the go and resume it on desktop.\n...\nThe feature arrives as an increasing number of users are turning to voice to issue commands to AI assistants for complex tasks.\n...\nIn July, OpenAI launched its new conversational model GPT-Live, and later the company i ntegrated it with the desktop app to let users use their voice to complete tasks in the Work tab or build apps in the Codex tab. The new rollout brings similar capabilities to the mobile app.\n...\nRecently, Anthropic made the handoff between mobile and desktop easier and also merged its Cowork and Chat interface. But OpenAI is still keeping chat and workspaces separate."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://www.theverge.com/ai-artificial-intelligence/999540/you-can-now-summon-chatgpt-voice-from-your-phone",
+      "id": "https://www.theverge.com/ai-artificial-intelligence/999540/you-can-now-summon-chatgpt-voice-from-your-phone",
+      "title": "You can now command ChatGPT Voice to do more things from your phone. | The Verge",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Emma Roth",
+      "image": "https://platform.theverge.com/wp-content/uploads/sites/2/2026/08/STK155_OPEN_AI_CVirginia_C-1.jpg?quality=90&strip=all&crop=0%2C10.732984293194%2C100%2C78.534031413613&w=1200",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "You can now command ChatGPT Voice to do more things from your phone. | The Verge\n...\nYou can now command ChatGPT Voice to do more things from your phone.\n...\nAfter launching its upgraded voice mode on desktop, OpenAI is bringing ChatGPT Voice\u2019s agentic capabilities to its mobile app. With the update, you use your voice to ask ChatGPT to perform tasks across connected apps \u2014 like checking your email or summarizing a file in Google Drive \u2014 from your phone or CarPlay."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://runtimewire.com/article/meta-muse-live-video-chat-voice",
+      "id": "https://runtimewire.com/article/meta-muse-live-video-chat-voice",
+      "title": "Meta adds live video chat to Muse, giving its AI agent a face and voice",
+      "score": null,
+      "published_date": "2026-09-24T00:00:00.000Z",
+      "author": "RuntimeWire",
+      "image": "https://runtimewire.com/og/meta-muse-live-video-chat-voice.16x9.jpg?v=og2-p6qxpi",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "Meta adds live video chat to Muse, giving its AI agent a face and voice\n...\nAlexandr Wang demonstrated the feature on September 24th, a day after Meta outlined the real-time avatar technology behind it.\n\n By Ryan Merket \u00b7 Published Sep 23rd, 2026, 7:50pm CT\n...\nMeta is making its personal AI agent more conversational as it asks users to trust it with connected apps and delegated tasks. Live video makes the interface feel more present; whether that improves usefulness enough to justify the added access remains unproven.\n...\nMeta has added live video chat and customizable real-time voice to Muse, its personal AI agent, extending the product from a task-oriented chat interface into a conversation with an animated presence. Meta chief AI officer Alexandr Wang (@alexandr_wang) demonstrated the feature in a September 24th post on X, saying users can video chat with Muse and prompt how it sounds.\n...\nWang's post showed the product rather than laying out its technical details. He noted that the iPhone screen recording did not capture audio, and told users to try the voice themselves. Axios reported the day before that Meta had added live video chat and real-time voice conversations with custom voice options to Muse. Meta's research team published a technical account of the avatar system on September 23rd.\n...\nThe research post describes Muse Realtime Avatar as an extension of Muse Realtime Voice: speech and video are generated from a shared stream so the avatar's voice, lip movement and expression stay synchronized. Meta says the system can animate a reference image during a live conversation, from a photographic portrait to an illustration, animal or everyday object. The model generates video in short, continuing segments, carrying recent visual context forward to keep the character consistent as the exchange continues.\n...\nMeta reports that its system streams portrait video at 25 frames per second, with approximately 870 milliseconds from the end of a user's turn to the first byte of its synchronized voice-and-video response. Those are company-reported system measurements, not a guarantee of the delay every user will experience. The same post says Meta redesigned its real-time inference stack, used model and serving optimizations, and worked with Nvidia to reduce the cost of generation.\n...\nThe video feature follows Muse's September 8th debut as a personal AI agent. Meta introduced Muse as software that can work across connected apps, browse the web and continue tasks in the background, with user approval for sensitive actions such as purchases and emails. Its initial pitch was practical delegation: give Muse a task, then review what it proposes to do. Live video adds a more social interface to that agent, while leaving its core job - acting on a user's behalf - in place.\n...\nThat combination sharpens the product's central tradeoff. To do useful work, Muse needs access to personal services and context; to feel like a conversational partner, it needs to hold attention and respond naturally. Meta says users control which apps they connect and can review or change permissions. A lifelike, responsive avatar does not itself make an agent more capable, and the demonstration does not establish how well video chat helps users complete tasks. It does give Meta another way to make an assistant built around delegated work feel present during the interaction.\n...\nFor Wang, the post is a product demonstration during Muse's early rollout, not a separate model announcement. Meta's research release supplies the more consequential technical detail: the company is building voice and generated video as one real-time system, rather than simply placing a prerecorded or separately animated character over a chatbot. Whether that added presence makes people more willing to use Muse - and grant it access to more of their digital lives - is a product question the feature itself cannot answer."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://www.androidauthority.com/gemini-3-8-flash-text-to-speech-rolling-out-3714915/",
+      "id": "https://www.androidauthority.com/gemini-3-8-flash-text-to-speech-rolling-out-3714915/",
+      "title": "Gemini can now clone your voice and perform scripts like an actor",
+      "score": null,
+      "published_date": "2026-09-24T08:02:31.000Z",
+      "author": null,
+      "image": null,
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "# Gemini can now clone your voice and perform scripts like an actor\n...\nGemini can now clone your voice and perform scripts like an actor\n...\n# Gemini can now clone your\n...\nand perform scripts\n...\nThe upgrade adds 2,000+ voices, two-speaker scenes, and finer delivery controls.\n...\n- Google is rolling out Gemini 3.8 Flash TTS and Flash-Lite TTS, its latest text-to-speech models for more expressive AI-generated audio.\n- Gemini 3.8 Flash TTS can create custom voices, replicate an authorized voice from a 30-second sample, and control accents, pacing, emotion, and two-speaker dialogue.\n- The new models are reaching Gemini Notebook and Google Vids, with both also available to developers through Google AI Studio and the Gemini API.\n...\nAI voiceovers can read a script. But getting them to actually perform it with the right accent, pacing, emotion, pauses, and even the occasional sigh is another story. To address this, Google has spent weeks growing Gemini 3.8 from the original Gemini 3.8 Flash into new Live and Live Extended Thinking models. And now it wants the same family to act the part, with Gemini 3.8 Flash Text-To-Speech (TTS) and Flash-Lite TTS rolling out.\n...\nThe biggest change for users is control. In a blog post, Google says Gemini 3.8 Flash TTS can create an original voice from a natural-language description, with support for more than 100 languages and dialects. You also get over 2,000 production-ready voices, and voice replication can recreate a consistent voice from a 30-second sample, provided you have permission to use it.\n...\nThis goes well beyond \u201cpaste text, get audio.\u201d Both models can follow line-by-line directions for tone, pacing, dialect changes, whispers, laughs, sighs, and other conversational cues. They can also stage two-speaker conversations from one script and keep voices consistent across hours of audio. That could mean podcasts, audiobooks, dubbing, voice agents, and narrated videos that all sound less robotic.\n...\nGoogle\u2019s benchmark results are strong\n...\ntoo. Gemini 3\n...\n8 Flash TTS ranked first overall on Hume AI\u2019s Voice Design Benchmark, including a 60.8 score for accents, while Flash and Flash-Lite took the top two spots on Hume\u2019s overall quality index. Voice Arena tests also put them at or near the top across several languages. ElevenLabs still scored higher in Hume\u2019s individual voice quality and human-like variation categories.\n...\nRegular users won\u2019t have to wait for every piece to reach developer tools. Flash TTS is rolling out in Gemini Notebook, while Flash-Lite TTS is rolling out in Google Vids, which just opened its latest Omni video generator to more users. Developers can access both through the Gemini API and AI Studio.\n...\nGoogle is also putting guardrails in place for voice replication. It requires consent verification, adds SynthID watermarking and C2PA credentials, and blocks AI Studio voice replication in several regions, including the UK, EEA (European Economic Area), India, Texas, and Illinois."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://9to5mac.com/2026/09/23/openai-just-upgraded-chatgpt-voice-in-three-ways/",
+      "id": "https://9to5mac.com/2026/09/23/openai-just-upgraded-chatgpt-voice-in-three-ways/",
+      "title": "OpenAI just upgraded ChatGPT Voice in three ways - 9to5Mac",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Zac Hall",
+      "image": "https://9to5mac.com/wp-content/uploads/sites/6/2026/06/chatgpt-orange.webp?resize=1200,628",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "# OpenAI just upgraded ChatGPT Voice in three ways\n\n Zac Hall | Sep 23 2026 - 10:24 am PT \n\nTalking to ChatGPT is getting better in three ways starting today. OpenAI is rolling out a collection of improvements to how ChatGPT Voice mode works.\n...\nFirst, ChatGPT Voice can now be powered by OpenAI\u2019s three GPT-6 models. Astra, the most capable, has been out for a few weeks. Sol and Luna, the new medium and small intelligence models were upgraded to GPT-6 yesterday.\n...\nNext, OpenAI says that plugins now work with ChatGPT Voice. This includes integration like email, calendar, and Slack. This was a big disconnect for ChatGPT Voice users before, so it should be a highly welcome change.\n...\nLastly, ChatGPT Voice now works with ChatGPT Work on the web and mobile. ChatGPT Work is OpenAI\u2019s cloud-connected agentic system that works everywhere. It\u2019s sort of like Codex on the desktop, but available in more places.\n...\nBack in July, OpenAI brought modern voice control to the ChatGPT desktop app. It\u2019s great to see this focus on voice continue with today\u2019s ChatGPT Voice-focused update."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://thenextweb.com/news/gemini-tts-3-8-flash-voice-design-cloning",
+      "id": "https://thenextweb.com/news/gemini-tts-3-8-flash-voice-design-cloning",
+      "title": "Google\u2019s new Gemini TTS models can clone a voice from 30 seconds of audio",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Ana Maria Constantin",
+      "image": "https://media.thenextweb.com/2026/09/gemini-3-8-flash-tts-flash-lite-tts-announcement-graphic.jpg",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "Google\u2019s new Gemini TTS models can clone a voice from 30 seconds of audio\n...\nGoogle has released Gemini 3.8 Flash TTS and Flash-Lite TTS. Users can design new voices from a text prompt or pick from more than 2,000 ready-made ones. Flash TTS can also recreate a voice from a 30-second sample after a consent check.\n...\n> \u201cToday, we\u2019re introducing two new text-to-speech models to the Gemini family, transforming voice generation from static presets into a dynamic creative studio,\u201d Google wrote in its announcement.\n...\nGoogle released Gemini 3.8 Flash TTS and Gemini 3.8 Flash-Lite TTS on Wednesday. Both are rolling out from today in the Gemini API and Google AI Studio. They join the Gemini 3.8 family, which Google launched earlier this month.\n...\nFlash TTS is built for creative work such as games, audiobooks and podcasts. Flash-Lite TTS is the cheaper, high-volume option, aimed at dubbing and voice agents, according to Google.\n...\nscratch by describing its role\n...\naccent and characteristics in plain\n...\n, across more than 100 languages\n...\ndialects. Google\u2019s examples include a high-energy DJ\n...\na Japanese dragon.\n...\nUsers can also pick from a library of more than 2,000 ready-made voices, including regional varieties such as Mexican Spanish, Quebec French and Scots English. Custom voices can be saved for reuse across projects. A voice remixing feature, which adjusts timbre, pitch, pace and accent, is coming soon.\n...\nsupport two-\n...\nFlash TTS can also recreate a voice from a 30-second audio sample. Google says users must supply a verbal consent recording from the voice owner, and the system checks that it matches the reference speaker before creating the voice.\n...\nGoogle says Flash TTS took first place on Hume AI\u2019s Voice Design Benchmark, with a score of 71.4. It says Flash TTS and Flash-Lite TTS also ranked first and second on Hume AI\u2019s Overall Quality Index. In blind preference tests on Voice Arena, the models secured top positions in languages including Japanese, Hindi and Mexican Spanish, according to Google.\n...\nThe market already has specialists such as ElevenLabs and India\u2019s Murf AI, and Adobe added speech generation to Firefly in August. Google named Figma, HeyGen, Wondercraft, Linguana, 99.co and Ollang as companies integrating the new models.\n...\nFlash TTS is also coming to Gemini Notebook, and Flash-Lite TTS to Google Vids. Access for enterprises through Gemini Enterprise is coming soon."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://www.businessinsider.com/openai-boosts-chatgpt-voice-mode-mobile-web-app-2026-9",
+      "id": "https://www.businessinsider.com/openai-boosts-chatgpt-voice-mode-mobile-web-app-2026-9",
+      "title": "OpenAI Boosts ChatGPT Voice Mode in Web, Mobile App - Business Insider",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Stephen Council",
+      "image": "https://i.insider.com/6ab31271eb7225411267971c?width=1200&format=jpeg",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "OpenAI Boosts ChatGPT Voice Mode in Web, Mobile App - Business Insider\n...\n# OpenAI wants you to 'blurt out your thoughts' to your phone\n...\nStephen Council\n\n \n\nToggle image caption \n\n In July, OpenAI's president, Greg Brockman, revealed an AI audio model that can listen and speak simultaneously. Bloomberg/Getty Images \n\n 2026-09-23T17:00:01.296Z \n\nOpenAI is pushing further into the hotly contested market for personal agents \u2014 this time with voice.\n...\nThe company is adding its most advanced voice system to ChatGPT's website and mobile app on Wednesday. OpenAI's release allows users to speak to delegate single and recurring tasks that require multiple steps, a browser, and disparate apps. The company has been rolling out launches ahead of its big OpenAI DevDay event next week.\n...\nOpenAI's product lead for ChatGPT voice, Atty Eleti, gave a demo to Business Insider. Only speaking with the app, he had the tool analyze his DoorDash spending, pay $5 to book a pickleball court, and"
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://www.thedeepview.com/articles/why-openai-is-giving-chatgpt-voice-a-bigger-job",
+      "id": "https://www.thedeepview.com/articles/why-openai-is-giving-chatgpt-voice-a-bigger-job",
+      "title": "Why OpenAI is giving ChatGPT Voice a bigger job | The Deep View",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Nat Rubio-Licht",
+      "image": "https://cdn.sanity.io/images/0no9te5e/production/03b33a390b62b4bb3caa278cba71e7217ba26501-1456x816.png?rect=0,28,1456,761&w=1200&h=627&fit=crop&auto=format",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "a bigger job |\n...\nSep 23\n...\n2026\u2022 5\n...\n00pm\n...\n# Why OpenAI is giving ChatGPT Voice a bigger job\n...\nOpenAI has created an assistant to help you get work done anywhere.\n...\nOn Wednesday, the lab released ChatGPT Voice \"on-the-go,\" bringing its voice models to the web and mobile experiences of its agentic tools. The product builds on GPT-Live, its upgraded voice model, by bringing ChatGPT Voice to its Work and Codex experiences.\n...\nOpenAI said that this release allows users to get work done whenever they speak to the model. For instance:\n...\n- For those with Pro and Plus plans, users can use Voice in ChatGPT Work on mobile to create docs, decks and spreadsheets, work with connected plugins, draft emails, create sites, and talk to Slack.\n...\n- Free and Go users can also use Voice in the chatbot itself to interact with plugins that they've connected to the text model, including tools and connected apps.\n...\n- The voice model is also connected to the text model, meaning that text conversations flow as ChatGPT answers vocally, allowing you to switch seamlessly back and forth between voice and text conversations. The company noted that ChatGPT Voice will become more powerful as ChatGPT itself grows more capable.\n...\ncompany unveiled the latest versions\n...\nThis expansion to ChatGPT Voice's agentic capabilities also comes as a new competitor emerges: Meta's Muse personal agent is rapidly rising in popularity. According to The Information, Muse has surpassed 500,000 users in the first week, including 250,000 daily active users. Muse is outpacing ChatGPT's early mobile launch.\n...\nOpenAI is feeling pressure on all sides. The company faces pressure from Anthropic to compete both on frontier model development and on enterprise adoption, while Meta has popped up as substantial competition on the consumer side. This update to ChatGPT Voice may actually address both of those fronts. While bringing ChatGPT Voice to platforms like Codex and ChatGPT Work certainly helps with enterprise adoption, bringing the experience to mobile could provide those same agentic capabilities to a far wider audience. That's where Meta's Muse agent is making such rapid progress by making agents easier for the average user to access. Essentially, this substantial update to ChatGPT Voice is trying to bridge the gap between enterprise and consumer adoption."
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://aiagentstore.ai/ai-agent-news/this-week",
+      "id": "https://aiagentstore.ai/ai-agent-news/this-week",
+      "title": "AI Agents News \u2014 Week of September 24, 2026 (Daily Updates)",
+      "score": null,
+      "published_date": "2026-09-24T03:24:02.242Z",
+      "author": null,
+      "image": null,
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "AI Agents News \u2014\n...\n21, 202\n...\n(Daily Updates)\n...\n### Automaid launches always-on AI operations hub\n...\n### OpenAI\u2019s Agents API opens broadly to developers\n...\n### Google and Meta push household and desktop agents, backed by new safety rails and enforcement tools\n...\n18,\n...\n### Instinct and Meta\u2019s Muse add outbound calling to assistants\n...\nWhat changed: Instinct rolled out \u201cInstinct Concierge\u201d to let user agents place phone calls and perform high-touch tasks (booking restaurants, joining cancellation lists) and Meta\u2019s Muse gained outbound calling to U.S. businesses, putting two major consumer agents in feature parity on voice-based interactions.\n...\nagent-enabled services should\n...\nproduct design and\n...\nconsent, call recordings\n...\n### Salesforce launches AIforce: a live interface layer to bring Salesforce into any AI workspace\n...\ns AIforce and\n...\nforce Coworker move\n...\ninto mainstream enterprise\n...\n-ready Agentforce portfolio plus a long"
+      ],
+      "highlight_scores": null
+    },
+    {
+      "url": "https://the-decoder.com/chatgpt-voice-gets-closer-to-her-with-email-calendar-and-slack-access/",
+      "id": "https://the-decoder.com/chatgpt-voice-gets-closer-to-her-with-email-calendar-and-slack-access/",
+      "title": "ChatGPT Voice gets closer to \"Her\" with email, calendar, and Slack access",
+      "score": null,
+      "published_date": "2026-09-23T00:00:00.000Z",
+      "author": "Matthias Bastian",
+      "image": "https://the-decoder.com/wp-content/uploads/2026/06/openai_logo_chatgpt-2-1200x675.png",
+      "favicon": null,
+      "subpages": null,
+      "extras": null,
+      "entities": null,
+      "crawl_date": null,
+      "snapshot_at": null,
+      "text": null,
+      "summary": null,
+      "highlights": [
+        "ChatGPT Voice gets closer to \"Her\" with email, calendar, and Slack access\n...\nChatGPT Voice gets a major upgrade. The globally available voice feature now runs on OpenAI's new GPT-6 Astra, Sol, and Luna models and can access plugins like email, calendar, and Slack for the first time. Users can now handle tasks directly by voice, whether that's looking up calendar events, sending emails, having ChatGPT spot and cancel duplicate charges in finance apps, or even building a website with a checkout page. OpenAI shows off several everyday scenarios in a demo video, including weather lookups and online shopping.\n...\nVoice also works in \"ChatGPT Work\" on web and mobile, where users can create documents, presentations, and spreadsheets just by talking. It's available now in the latest app version.\n...\nFor OpenAI and CEO Sam Altman, it's another step toward an everyday AI assistant like the one in the sci-fi film \"Her.\" Altman cited the movie as a reference back in 2024 when the first ChatGPT Voice version launched. OpenAI sees the potential to change how people use computers, but the approach also comes with risks."
+      ],
+      "highlight_scores": null
+    }
+  ],
+  "resolved_search_type": "",
+  "auto_date": null,
+  "context": null,
+  "output": null,
+  "statuses": null,
+  "cost_dollars": {
+    "total": 0.007,
+    "search": {
+      "neural": 0.007
+    },
+    "contents": null
+  },
+  "search_time": 1545.8
+}

@@ -5,8 +5,9 @@ description: How this project calls OpenAI models (profile extraction, query pla
 
 # OpenAI in this project
 
-Call shapes below are from memory of the Responses API and **must be confirmed in phase 00**
-(`docs/phases/00-smoke-test.md`). Record what you confirm in `docs/DECISIONS.md` and fix this file.
+Call shapes below are confirmed live in phase 00 (`docs/phases/00-smoke-test.md`); see
+`docs/DECISIONS.md` D-09. All three candidate model IDs (`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`)
+exist on this key.
 
 ## Which model for which job
 
@@ -28,7 +29,9 @@ Price table (per 1M tokens, Sept 2026 developer docs; keep in `app/pricing.py`):
 
 Reasoning tokens are billed as output. Phase 00 lists the models actually available to the key; if GPT-6 IDs are missing, use what the key has and update config.
 
-## Structured output (Responses API + Pydantic) [VERIFY]
+## Structured output (Responses API + Pydantic)
+
+Confirmed working as-is in phase 00 against `openai` SDK 3.19.2, on `gpt-6-sol` with `reasoning={"effort": "none"}`:
 
 ```python
 from openai import OpenAI
@@ -49,7 +52,9 @@ resp = client.responses.parse(
     reasoning={"effort": "none"},
 )
 plan: QueryPlan = resp.output_parsed           # None if the model refused
-usage = resp.usage                              # input_tokens, output_tokens (incl. reasoning)
+usage = resp.usage                              # ResponseUsage: input_tokens, input_tokens_details
+                                                 # (cache_write_tokens, cached_tokens), output_tokens,
+                                                 # output_tokens_details (reasoning_tokens), total_tokens
 ```
 
 Rules:

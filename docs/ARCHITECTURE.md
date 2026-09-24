@@ -1,6 +1,6 @@
 # Personal Podcast Generator — Architecture
 
-> Status: **v0.6**. Items marked **[VERIFY]** are confirmed in phase 00 (smoke test) before anything is built on them. Record the outcome in `docs/DECISIONS.md`.
+> Status: **v0.7**. Phase 00 (smoke test) confirmed the provider call shapes below; see `docs/DECISIONS.md` D-09. Remaining **[VERIFY]** items (e.g. Starlette range-request support) are outside phase 00's scope and stay open until the phase that needs them.
 
 ## 1. Goals and priorities
 
@@ -145,7 +145,7 @@ pending → planning → fetching → ranking → extracting → scripting → v
 - One request per chunk with a fixed `seed` and the user's two voices. v3 has no request stitching, so the boundary strategy is the mitigation.
 - Script turns may carry sparse v3 audio tags (`[laughs]`, `[curious]`); tags are stripped from the transcript shown in the UI.
 - Chunk audio is saved to `data/chunks/{episode_id}/{n}.*`; a failed or bad chunk is regenerated alone.
-- Output format: PCM 44.1 kHz if the plan allows **[VERIFY]**, else `mp3_44100_128`.
+- Output format: PCM 44.1 kHz — confirmed available on this plan in phase 00.
 - Output is nondeterministic: for `sample.mp3`, generate 2–3 takes and pick the best.
 - Fallback adapter (not built unless needed): per-turn `eleven_multilingual_v2` with request stitching.
 
@@ -265,16 +265,16 @@ GET  /admin/metrics?from&to&include_synthetic   admin only
 | Mock data | Seeded rows flagged `is_synthetic` | Unflagged mock data | Honest dashboard; real vs mock is visible |
 
 ## 14. Open items verified in phase 00
-1. OpenAI: model IDs available to the key; Responses API structured outputs on GPT-6; token usage fields.
-2. Exa: SDK call shapes, `costDollars`, date filter behavior on news queries.
-3. ElevenLabs: Text to Dialogue SDK call, character quota on the provided key, PCM availability, two voices chosen by ear.
-4. Jev: access and SDK (only if phase 04 includes it).
+1. OpenAI: all three model IDs (`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`) exist on the key; `responses.parse(..., text_format=..., reasoning={"effort": "none"})` works as documented; usage fields are `input_tokens`, `input_tokens_details` (`cache_write_tokens`, `cached_tokens`), `output_tokens`, `output_tokens_details` (`reasoning_tokens`), `total_tokens`.
+2. Exa: SDK call shapes confirmed (snake_case kwargs, `cost_dollars` not `costDollars`, no SDK-level `request_id`); date filter made no result-count difference on a fast-moving topic (both hit the 10-result default).
+3. ElevenLabs: Text to Dialogue SDK call confirmed, including that `api_key` must be passed explicitly (not auto-read from env). **Character quota could not be read** — this project's key is a scoped take-home-test key (401 on `user_read` and `voices_read`); voice selection fell back to verified premade voices. PCM (`pcm_44100`) confirmed available. Voices chosen: Antoni (host_a/Alex) + Rachel (host_b/Sam).
+4. Jev: `TYPESAFE_API_KEY` is set, but no SDK/request shape is documented anywhere in this repo, so `jev_check.py` was cut (phase 00's own "cut first" item) — deferred to phase 04, which will need to research the Typesafe/Jev API before writing the adapter.
 
 ## 15. Build phases
 
 | Phase | Session | Deliverable |
 |---|---|---|
-| 00 Smoke test | 1 | Every provider called once; `[VERIFY]` items resolved; voices picked |
+| 00 Smoke test | 1 | Every provider called once; provider `[VERIFY]` items resolved; voices picked |
 | 01 Scaffold | 1 | Repo, docker-compose, schema + migrations, config, adapters with fakes, CLI skeleton |
 | 02 Ingestion | 1 | Profile extraction, query planning, Exa search, dedupe, CLI `plan` / `fetch` |
 | 03 Pipeline | 1 | Rank → extract → script → voice → assemble; CLI `generate` → first MP3 |

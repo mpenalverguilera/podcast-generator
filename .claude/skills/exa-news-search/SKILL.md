@@ -38,11 +38,13 @@ Raw HTTP equivalent (camelCase):
 
 Rules (from Exa's guidance, applied to this product):
 - **Do not set** `category` (not even `"news"`), `numResults` (default 10 is our product choice), `includeDomains` / `excludeDomains`, `maxAgeHours`, `summary`, or `text` on search.
-- `startPublishedDate` is justified here: the episode window ("since your last episode") is a stated bounded window we must enforce. It drops undated or misdated pages, so if a query returns fewer than 3 results, **retry once without it** and keep results whose `publishedDate` is inside the window or missing.
+- `startPublishedDate` is justified here: the episode window ("since your last episode") is a stated bounded window we must enforce. It drops undated or misdated pages, so if a query returns fewer than 3 results, **retry once without it** and keep results whose `publishedDate` is inside the window or missing. Confirmed in phase 00: for a fast-moving topic ("AI voice agents this week") both the 7-day-windowed and unfiltered queries returned the full 10-result default with no visible count difference — the retry-without-filter path exists for slower-moving or narrower topics, not as the common case.
 - Source preferences from the profile ("prefers primary sources") go into the query phrasing, not filters.
 - Python SDK: snake_case keyword arguments (`start_published_date`, `output_schema`); camelCase raises `TypeError`.
 
-Map each result to `RawArticle`: `url`, `title`, `published_date`, `author`, `highlights` (join the list), outlet = URL host. Record `res.cost_dollars` (response field `costDollars`) as the step cost and `requestId` in logs. **[VERIFY in phase 00]** exact attribute names on the SDK response object.
+Map each result to `RawArticle`: `url`, `title`, `published_date`, `author`, `highlights` (join the list), outlet = URL host. Record `res.cost_dollars` as the step cost.
+
+Confirmed in phase 00 (exa-py 2.22.2): the SDK response object exposes snake_case attributes, not the raw HTTP's camelCase JSON keys. `search()` response: `results`, `statuses`, `cost_dollars` (a `CostDollars` object with `.total` and `.search`/`.contents` breakdowns, not a raw float), `output`, `resolved_search_type`, `auto_date`, `context`, `search_time`. There is **no `request_id` / `requestId` attribute** on the SDK object (only on the raw HTTP response), so don't log it from the SDK result. Each result item: `id`, `url`, `title`, `author`, `published_date`, `highlights`, `highlight_scores`, `text`, `summary`, `score`, `image`, `favicon`, `crawl_date`, `snapshot_at`, `subpages`, `extras`, `entities`.
 
 ## `/contents` — exact request
 
