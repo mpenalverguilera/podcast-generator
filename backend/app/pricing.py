@@ -8,6 +8,12 @@ OPENAI_PRICES_PER_1M: dict[str, tuple[float, float, float]] = {
     "gpt-6-luna": (0.10, 0.01, 0.50),
 }
 
+# $ per 1M input tokens. Output tokens are free for Jev. From docs.typesafe.ai/models
+# (docs/DECISIONS.md D-32).
+TYPESAFE_PRICES_PER_1M: dict[str, float] = {
+    "jev-1.13.0": 0.042,
+}
+
 
 def cost_for(
     provider: str,
@@ -30,6 +36,11 @@ def cost_for(
         price_in, _price_cached, price_out = OPENAI_PRICES_PER_1M[model]
         cost = (units_in * price_in + units_out * price_out) / 1_000_000
         return cost, False
+
+    if provider == "typesafe":
+        if model not in TYPESAFE_PRICES_PER_1M:
+            raise ValueError(f"no price entry for TypeSafe model {model!r}")
+        return units_in * TYPESAFE_PRICES_PER_1M[model] / 1_000_000, False
 
     if provider == "exa":
         # Exa returns its own exact costDollars per call; there's no units*rate

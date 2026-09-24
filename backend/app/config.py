@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     model_script_reasoning: str = "medium"
     model_grounding: str = "gpt-6-luna"
     model_grounding_reasoning: str = "low"
+    # Pinned, not "jev-latest", so classifier eval numbers stay reproducible (D-32).
+    model_jev: str = "jev-1.13.0"
     classifier_provider: Literal["openai", "jev", "fake"] = "openai"
 
     # TTS
