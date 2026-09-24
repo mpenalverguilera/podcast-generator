@@ -1,0 +1,17 @@
+from app.adapters.classifier.fake import FakeClassifier
+from app.adapters.classifier.openai import LLMClassifier
+from app.adapters.classifier.protocol import Classifier
+from app.adapters.llm import get_llm
+from app.config import Settings, get_settings
+
+
+def get_classifier(settings: Settings | None = None, override: str | None = None) -> Classifier:
+    settings = settings or get_settings()
+    provider = override or settings.classifier_provider
+    if provider == "fake":
+        return FakeClassifier()
+    if provider == "openai":
+        return LLMClassifier(get_llm(settings), settings)
+    if provider == "jev":
+        raise NotImplementedError("JevClassifier lands in phase 04")
+    raise ValueError(f"unknown classifier provider {provider!r}")

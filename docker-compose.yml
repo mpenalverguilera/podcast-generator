@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: podcast
+      POSTGRES_PASSWORD: podcast
+      POSTGRES_DB: podcast
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U podcast -d podcast"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # backend/Dockerfile doesn't exist yet (phase 08 builds it, per
+  # docs/phases/01-scaffold.md "cut first" — this phase runs the API locally via
+  # uv instead). `docker compose up --build` will fail on this service until then;
+  # `docker compose up -d db` is all phase 01 needs.
+  api:
+    build:
+      context: ./backend
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  # Placeholder — real frontend + Dockerfile land in phase 06.
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: ["sh", "-c", "echo 'web placeholder - built in phase 06'; sleep infinity"]
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:

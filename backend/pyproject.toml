@@ -7,15 +7,41 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.0",
+    "apscheduler>=3.11.3",
+    "bcrypt<4.1",
     "elevenlabs>=2.69.0",
     "exa-py>=2.22.2",
+    "fastapi>=0.141.1",
     "openai>=3.19.2",
+    "passlib[bcrypt]>=1.7.4",
+    "psycopg[binary]>=3.3.6",
+    "pydantic-settings>=2.15.0",
+    "pydub>=0.25.1",
+    "pyjwt>=2.15.0",
     "python-dotenv>=1.2.3",
+    "sqlalchemy>=2",
+    "typer>=0.27.2",
+    "uvicorn[standard]>=0.53.0",
 ]
-
-[project.scripts]
-backend = "backend:main"
 
 [build-system]
 requires = ["uv_build>=0.12.18,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
