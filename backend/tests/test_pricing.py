@@ -14,12 +14,14 @@ def test_openai_unknown_model_raises() -> None:
         cost_for("openai", "not-a-real-model", units_in=1, units_out=1)
 
 
-def test_typesafe_cost_is_input_only_and_exact() -> None:
-    cost, is_estimate = cost_for("typesafe", "jev-1.13.0", units_in=1_000_000, units_out=500)
-    assert cost == pytest.approx(0.042)
+def test_vercel_gateway_cost_passes_through_and_is_not_estimated() -> None:
+    cost, is_estimate = cost_for(
+        "vercel_gateway", "typesafe-ai/jev", units_in=275, units_out=20, market_cost_usd=0.00001155
+    )
+    assert cost == pytest.approx(0.00001155)
     assert is_estimate is False
     with pytest.raises(ValueError):
-        cost_for("typesafe", "jev-unknown", units_in=1)
+        cost_for("vercel_gateway", "typesafe-ai/jev", units_in=1)
 
 
 def test_exa_cost_passes_through_and_is_not_estimated() -> None:

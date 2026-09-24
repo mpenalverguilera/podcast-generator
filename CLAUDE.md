@@ -49,7 +49,7 @@ docker compose up --build                      # everything
 ## Rules
 
 **Secrets**
-- Keys come only from environment via `app/config.py` (pydantic-settings reading `.env`): `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `EXA_API_KEY`, optional `TYPESAFE_API_KEY` (Jev).
+- Keys come only from environment via `app/config.py` (pydantic-settings reading `.env`): `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `EXA_API_KEY`, optional `AI_GATEWAY_API_KEY` (Jev, via Vercel AI Gateway — see D-33; free evaluation credits need a card on file with Vercel).
 - `.env` is gitignored; `.env.example` lists every variable with a placeholder. Never print, log, or commit a key. Never put a key in frontend code.
 
 **Environment setup**

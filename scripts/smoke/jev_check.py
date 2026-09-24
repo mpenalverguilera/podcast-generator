@@ -1,10 +1,11 @@
-"""Smoke test: TypeSafe Jev (the phase 00 check that was deferred, docs/DECISIONS.md D-32).
+"""Smoke test: Jev via Vercel AI Gateway (docs/DECISIONS.md D-33).
 
 Confirms:
-- TYPESAFE_API_KEY loads from .env and authenticates
-- the production JevClassifier returns probabilities, exact input tokens and a cost
+- AI_GATEWAY_API_KEY loads from .env and authenticates against https://ai-gateway.vercel.sh
+- the production JevClassifier posts to /v1/evaluate and parses topic/newsworthy/already_covered
+  answers, exact token usage and AI Gateway's marketCost correctly
 
-One call, a few hundred input tokens: well under $0.0001.
+One article, three questions in one request: a few hundred input tokens, well under $0.001.
 
 Run (from repo root): uv run --project backend python scripts/smoke/jev_check.py
 """
@@ -56,11 +57,12 @@ def main() -> int:
         print(f"{article.title!r}")
         print(
             f"  relevance={result.relevance:.3f} newsworthy={result.newsworthy:.3f} "
-            f"score={result.score:.3f}"
+            f"already_covered={result.already_covered} score={result.score:.3f}"
         )
         print(
-            f"  model={usage.model} input_tokens={usage.units_in} cost=${usage.cost_usd:.7f} "
-            f"latency={usage.latency_ms}ms request_id={usage.request_id}"
+            f"  model={usage.model} input_tokens={usage.units_in} output_tokens={usage.units_out} "
+            f"market_cost=${usage.cost_usd:.8f} latency={usage.latency_ms}ms "
+            f"generation_id={usage.request_id}"
         )
     return 0
 

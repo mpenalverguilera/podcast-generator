@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
     exa_api_key: SecretStr | None = None
-    typesafe_api_key: SecretStr | None = None
+    # Jev (TypeSafe) is only reachable through Vercel's AI Gateway, not TypeSafe's own API --
+    # see docs/DECISIONS.md D-33 (D-32's direct-SDK integration used the wrong key/endpoint).
+    ai_gateway_api_key: SecretStr | None = None
     search_provider: Literal["exa", "fake"] = "exa"
     llm_provider: Literal["openai", "fake"] = "openai"
 
@@ -45,8 +47,9 @@ class Settings(BaseSettings):
     model_script_reasoning: str = "medium"
     model_grounding: str = "gpt-6-luna"
     model_grounding_reasoning: str = "low"
-    # Pinned, not "jev-latest", so classifier eval numbers stay reproducible (D-32).
-    model_jev: str = "jev-1.13.0"
+    # Vercel AI Gateway model slug (provider/model), not a TypeSafe-native version string
+    # (D-33). Pinned rather than an alias so classifier eval numbers stay reproducible.
+    model_jev: str = "typesafe-ai/jev"
     classifier_provider: Literal["openai", "jev", "fake"] = "openai"
 
     # TTS

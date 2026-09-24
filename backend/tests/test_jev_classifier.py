@@ -1,5 +1,8 @@
-from types import SimpleNamespace
+import copy
+import json
+from pathlib import Path
 
+import httpx
 import pytest
 
 from app.adapters.classifier import get_classifier
@@ -8,30 +11,38 @@ from app.config import Settings
 from app.models import Article
 from app.schemas import InterestProfile, Topic
 
+# A real /v1/evaluate response, captured once against the live Vercel AI Gateway and committed
+# with no secrets in it (docs/DECISIONS.md D-33) -- what gets tested is exactly the shape the
+# gateway returns, not a hand-guessed one.
+FIXTURE = json.loads(
+    Path(__file__).parent.joinpath("fixtures/jev_evaluate.json").read_text(encoding="utf-8")
+)
+
 
 class StubClient:
-    """Stands in for TypeSafeClient: records the call, answers every Noul it
-    was asked with a fixed probability. No network."""
+    """Stands in for httpx.Client: records each call, answers with a given response body (the
+    real captured fixture by default). No network."""
 
-    def __init__(self, probs: dict[str, float], input_tokens: int = 1000) -> None:
-        self.probs = probs
-        self.input_tokens = input_tokens
+    def __init__(self, response_body: dict = FIXTURE, status_code: int = 200) -> None:
+        self.response_body = response_body
+        self.status_code = status_code
         self.calls: list[dict] = []
 
-    def system_one(self, state, questions, *, model):
-        self.calls.append({"state": state, "questions": questions, "model": model})
-        return SimpleNamespace(
-            model=model,
-            request_id="req-test",
-            usage=SimpleNamespace(input_tokens=self.input_tokens, output_tokens=12),
-            nouls={name: SimpleNamespace(noul=self.probs[name]) for name in questions},
-        )
+    def post(self, path: str, *, json: dict) -> httpx.Response:
+        self.calls.append({"path": path, "json": json})
+        request = httpx.Request("POST", "https://ai-gateway.vercel.sh" + path)
+        return httpx.Response(self.status_code, json=self.response_body, request=request)
 
 
 def _profile() -> InterestProfile:
     return InterestProfile(
         topics=[
-            Topic(name="space", description="launches", include=["rockets"], exclude=["astrology"])
+            Topic(
+                name="Space launches",
+                description="launches",
+                include=["rockets"],
+                exclude=["astrology"],
+            )
         ],
         avoid=["celebrity gossip"],
     )
@@ -41,47 +52,54 @@ def _article() -> Article:
     return Article(id=1, url_hash="h", url="u", title="Rocket launches", highlights=["It flew."])
 
 
-def test_nouls_map_to_score_result_and_usage() -> None:
-    client = StubClient({"relevant": 0.9, "newsworthy": 0.5})
-    result, usage = JevClassifier(Settings(), client=client).score(
-        _article(), _profile(), "space", []
+def test_fixture_response_maps_to_score_result_and_usage() -> None:
+    client = StubClient()
+    result, usage = JevClassifier(Settings(ai_gateway_api_key="agw-test"), client=client).score(
+        _article(), _profile(), "Space launches", ["Old unrelated headline"]
     )
 
-    assert result.topic == "space"
-    assert result.relevance == 0.9
-    assert result.newsworthy == 0.5
-    assert result.score == pytest.approx(0.45)
-    assert result.already_covered is False
+    assert result.topic == "Space launches"
+    assert result.relevance == 1.0  # fixture: choice="Space launches", probabilities[topic]=1
+    assert result.newsworthy == pytest.approx(0.44)
+    assert result.already_covered is False  # fixture probability 0.04 <= 0.5
+    assert result.score == pytest.approx(0.44)
 
-    assert usage.provider == "typesafe"
-    assert usage.model == "jev-1.13.0"
-    assert usage.units_in == 1000
-    assert usage.cost_usd == pytest.approx(1000 * 0.042 / 1_000_000)
+    assert usage.provider == "vercel_gateway"
+    assert usage.model == "typesafe-ai/jev"
+    assert usage.units_in == 742
+    assert usage.units_out == 71
+    assert usage.cost_usd == pytest.approx(0.000031164)
     assert usage.cost_is_estimate is False
-    assert usage.request_id == "req-test"
+    assert usage.request_id == "gen_01M3AMH8T0EMMD94N6ZGHAKKYG"
 
-    state = client.calls[0]["state"]
-    assert state["topic"]["exclude"] == ["astrology"]
-    assert state["avoid"] == ["celebrity gossip"]
+    sent = client.calls[0]["json"]
+    assert sent["model"] == "typesafe-ai/jev"
+    assert sent["questions"]["topic"]["criteria"]["none"].startswith("Not a genuine match")
+    assert sent["state"]["avoid"] == ["celebrity gossip"]
+    assert sent["state"]["recent_headlines"] == ["Old unrelated headline"]
 
 
-def test_already_covered_asked_only_with_recent_headlines() -> None:
-    client = StubClient({"relevant": 0.9, "newsworthy": 0.9, "already_covered": 0.8})
-    classifier = JevClassifier(Settings(), client=client)
-
-    classifier.score(_article(), _profile(), "space", [])
-    assert "already_covered" not in client.calls[0]["questions"]
-
-    result, _ = classifier.score(_article(), _profile(), "space", ["Rocket launches"])
-    assert "already_covered" in client.calls[1]["questions"]
-    assert result.already_covered is True
+def test_none_choice_forces_relevance_zero() -> None:
+    body = copy.deepcopy(FIXTURE)
+    body["answers"]["topic"] = {
+        "type": "choice",
+        "choice": "none",
+        "probabilities": {"Space launches": 0.3, "none": 0.7},
+    }
+    client = StubClient(response_body=body)
+    result, _ = JevClassifier(Settings(ai_gateway_api_key="agw-test"), client=client).score(
+        _article(), _profile(), "Space launches", []
+    )
+    # Forced to 0 even though "Space launches" still held nonzero probability mass.
+    assert result.relevance == 0.0
+    assert result.score == 0.0
 
 
 def test_missing_key_raises() -> None:
-    with pytest.raises(RuntimeError, match="TYPESAFE_API_KEY"):
-        JevClassifier(Settings(typesafe_api_key=None))
+    with pytest.raises(RuntimeError, match="AI_GATEWAY_API_KEY"):
+        JevClassifier(Settings(ai_gateway_api_key=None))
 
 
 def test_factory_returns_jev() -> None:
-    settings = Settings(classifier_provider="jev", typesafe_api_key="ts-test")
+    settings = Settings(classifier_provider="jev", ai_gateway_api_key="agw-test")
     assert isinstance(get_classifier(settings), JevClassifier)

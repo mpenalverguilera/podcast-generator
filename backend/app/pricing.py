@@ -8,12 +8,6 @@ OPENAI_PRICES_PER_1M: dict[str, tuple[float, float, float]] = {
     "gpt-6-luna": (0.10, 0.01, 0.50),
 }
 
-# $ per 1M input tokens. Output tokens are free for Jev. From docs.typesafe.ai/models
-# (docs/DECISIONS.md D-32).
-TYPESAFE_PRICES_PER_1M: dict[str, float] = {
-    "jev-1.13.0": 0.042,
-}
-
 
 def cost_for(
     provider: str,
@@ -22,6 +16,7 @@ def cost_for(
     units_out: int = 0,
     *,
     exa_cost_usd: float | None = None,
+    market_cost_usd: float | None = None,
 ) -> tuple[float, bool]:
     """Returns (cost_usd, cost_is_estimate) for one provider call.
 
@@ -37,10 +32,13 @@ def cost_for(
         cost = (units_in * price_in + units_out * price_out) / 1_000_000
         return cost, False
 
-    if provider == "typesafe":
-        if model not in TYPESAFE_PRICES_PER_1M:
-            raise ValueError(f"no price entry for TypeSafe model {model!r}")
-        return units_in * TYPESAFE_PRICES_PER_1M[model] / 1_000_000, False
+    if provider == "vercel_gateway":
+        # Vercel AI Gateway's /v1/evaluate (Jev) returns its own exact marketCost per call --
+        # pass it through, same pattern as Exa's costDollars (D-33). Not `cost`, which reads 0
+        # while the account is still on free evaluation credits.
+        if market_cost_usd is None:
+            raise ValueError("vercel_gateway cost requires market_cost_usd")
+        return market_cost_usd, False
 
     if provider == "exa":
         # Exa returns its own exact costDollars per call; there's no units*rate
