@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import select
 
 from app.models import EpisodeStatus, PipelineStep, StepStatus
@@ -85,3 +87,24 @@ def test_resume_from_failed_stage(db, monkeypatch) -> None:
         stage_counts[s.stage] = stage_counts.get(s.stage, 0) + 1
     assert stage_counts.pop("voicing") == 2
     assert all(count == 1 for count in stage_counts.values())
+
+
+def test_logs_stage_entry_and_failure_at_error_level(db, monkeypatch, caplog) -> None:
+    episode = make_user_with_episode(db)
+
+    def _boom(_episode, _adapters, _db):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(voice_stage, "run", _boom)
+
+    with caplog.at_level(logging.INFO, logger="app.pipeline.runner"):
+        run_episode(episode.id)
+
+    entered_planning = any(
+        r.levelno == logging.INFO and "entering stage planning" in r.message for r in caplog.records
+    )
+    assert entered_planning
+
+    failure_records = [r for r in caplog.records if "stage voicing failed" in r.message]
+    assert len(failure_records) == 1
+    assert failure_records[0].levelno == logging.ERROR

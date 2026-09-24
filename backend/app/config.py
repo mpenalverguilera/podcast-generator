@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Paths
     data_dir: Path = Path("./data")
 
+    # Logging -- terminal-only, architectural (stage transitions, not
+    # per-request provider chatter); see app/logging_setup.py.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
 
 @lru_cache
 def get_settings() -> Settings:

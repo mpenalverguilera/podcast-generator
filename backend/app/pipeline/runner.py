@@ -65,6 +65,12 @@ def run_episode(
             return episode
 
         start = _start_index(episode)
+        logger.info(
+            "episode %s pipeline start: resuming from stage %s%s",
+            episode.id,
+            STAGE_ORDER[start][0].value if start < len(STAGE_ORDER) else "(none, already ready)",
+            f", tts override={tts_override}" if tts_override else "",
+        )
         for idx in range(start, len(STAGE_ORDER)):
             stage_status, stage_module = STAGE_ORDER[idx]
             stage_name = stage_status.value
@@ -74,11 +80,12 @@ def run_episode(
                 episode.status = EpisodeStatus.FAILED
                 episode.failed_stage = stage_name
                 episode.error = "daily spend cap exceeded"
-                logger.info(
+                logger.warning(
                     "episode %s stopped before %s: daily spend cap exceeded", episode.id, stage_name
                 )
                 return episode
 
+            logger.info("episode %s -> entering stage %s", episode.id, stage_name)
             stage_start = time.monotonic()
             started_at = datetime.now(UTC)
             try:
@@ -100,7 +107,7 @@ def run_episode(
                 episode.status = EpisodeStatus.FAILED
                 episode.failed_stage = stage_name
                 episode.error = str(exc)
-                logger.info(
+                logger.error(
                     "episode %s stage %s failed after %dms: %s",
                     episode.id,
                     stage_name,
@@ -143,9 +150,11 @@ def run_episode(
             episode.status = next_status
             if next_status == EpisodeStatus.READY:
                 episode.ready_at = datetime.now(UTC)
+                logger.info("episode %s ready: %r", episode.id, episode.title)
             db.flush()
 
             if stage_name == stop_after:
+                logger.info("episode %s stopped after %s (--stop-after)", episode.id, stage_name)
                 return episode
 
         return episode
