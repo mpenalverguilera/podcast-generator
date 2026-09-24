@@ -6,7 +6,7 @@ Confirms:
 - /contents with text=True for top 2 URLs, statuses
 - saves both raw responses (no keys) to backend/tests/fixtures/
 
-Run: uv run python ../scripts/smoke/exa_check.py   (from backend/, where the venv lives)
+Run (from repo root): uv run --project backend python scripts/smoke/exa_check.py
 """
 
 from __future__ import annotations

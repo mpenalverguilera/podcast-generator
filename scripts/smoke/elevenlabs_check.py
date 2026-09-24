@@ -12,7 +12,7 @@ both 401 with "missing the permission {user_read,voices_read}"). So voice select
 ElevenLabs' classic premade voices, each verified live below with a 1-word `text_to_speech` call
 before being offered as a dialogue-pair candidate.
 
-Run: uv run python ../scripts/smoke/elevenlabs_check.py   (from backend/, where the venv lives)
+Run (from repo root): uv run --project backend python scripts/smoke/elevenlabs_check.py
 """
 
 from __future__ import annotations

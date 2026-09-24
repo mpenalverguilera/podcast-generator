@@ -4,7 +4,7 @@ Confirms:
 - which of gpt-6-sol / gpt-6-luna / gpt-6-astra the key can see
 - the exact `client.responses.parse(..., text_format=...)` call shape and usage fields
 
-Run: uv run python ../scripts/smoke/openai_check.py   (from backend/, where the venv lives)
+Run (from repo root): uv run --project backend python scripts/smoke/openai_check.py
 """
 
 from __future__ import annotations

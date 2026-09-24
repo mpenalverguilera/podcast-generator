@@ -112,7 +112,7 @@ def main() -> None:
     print("\nSetup complete.")
     print("- Backend deps installed/synced in backend/.venv from pyproject.toml + uv.lock")
     print("- Make sure .env has real API keys before running any real provider call")
-    print("- Try: cd backend && uv run python ../scripts/smoke/openai_check.py")
+    print("- Try: uv run --project backend python scripts/smoke/openai_check.py")
     print("  (uv run pytest -q works once a phase adds pytest as a dependency and tests exist)")
 
 

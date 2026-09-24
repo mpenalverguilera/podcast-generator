@@ -39,6 +39,7 @@ uv run uvicorn app.main:app --reload           # API on :8000
 uv run python -m app.cli --help                # pipeline CLI (plan, fetch, generate, ...)
 uv run pytest -q                               # tests (never hit real APIs)
 uv run ruff check . && uv run ruff format .    # lint/format
+uv run --project backend python scripts/smoke/<name>.py   # provider smoke tests, run from repo root
 cd frontend && npm install && npm run dev      # web on :5173
 docker compose up --build                      # everything
 ```
@@ -54,6 +55,7 @@ docker compose up --build                      # everything
 - Never add a dependency by hand-editing `pyproject.toml` or running bare `pip install`. Add it with `uv add <package>` (or `uv add --dev <package>`) from `backend/`; this updates both `pyproject.toml` and `uv.lock` together, which is what makes `uv sync` reproducible for everyone else.
 - After adding, removing, or upgrading a dependency, re-run `python scripts/setup.py` (or `uv sync`) yourself to confirm it installs clean, and commit the updated `pyproject.toml` + `uv.lock` in the same commit as the code that needs the new dependency.
 - If a phase needs a new external tool the way phase 00 needed Exa's `build-with-exa` skill, add its bootstrap step to `scripts/setup.py` too (with a fallback if the usual installer — e.g. `npx` — isn't guaranteed to be on PATH) rather than leaving it as a one-off manual step in a phase report.
+- There is deliberately only **one** Python environment in this repo: `backend/.venv`. Scripts that live outside `backend/` (e.g. `scripts/smoke/`) still run against it, via `uv run --project backend python scripts/<path>.py` from the repo root — never a bare `python scripts/...` or a bare `uv run python scripts/...` from outside `backend/`, both of which silently fall back to the system interpreter and look like "missing dependencies" when they're really just running the wrong Python.
 
 **Providers and cost**
 - All provider access goes through the adapters in `app/adapters/`. Pipeline code never imports an SDK directly.
