@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     seed_admin_password: SecretStr = SecretStr("admin")
     seed_user_email: str = "demo@example.com"
     seed_user_password: SecretStr = SecretStr("demo")
+    seed_eval_user_email: str = "eval@example.com"
+    seed_eval_user_password: SecretStr = SecretStr("eval")
 
     # Models
     model_profile: str = "gpt-6-sol"
@@ -42,6 +44,7 @@ class Settings(BaseSettings):
     model_script: str = "gpt-6-sol"
     model_script_reasoning: str = "medium"
     model_grounding: str = "gpt-6-luna"
+    model_grounding_reasoning: str = "low"
     classifier_provider: Literal["openai", "jev", "fake"] = "openai"
 
     # TTS

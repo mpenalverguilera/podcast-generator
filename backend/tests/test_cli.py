@@ -12,13 +12,13 @@ def test_seed_users_is_idempotent(db) -> None:
     assert result1.exit_code == 0, result1.output
 
     db.expire_all()
-    assert db.scalar(select(func.count()).select_from(User)) == 2
+    assert db.scalar(select(func.count()).select_from(User)) == 3
 
     result2 = runner.invoke(cli, ["seed-users"])
     assert result2.exit_code == 0, result2.output
 
     db.expire_all()
-    assert db.scalar(select(func.count()).select_from(User)) == 2
+    assert db.scalar(select(func.count()).select_from(User)) == 3
 
 
 def test_new_episode_and_run(db) -> None:
@@ -26,7 +26,13 @@ def test_new_episode_and_run(db) -> None:
     assert seed_result.exit_code == 0, seed_result.output
 
     db.expire_all()
-    demo_email = db.scalars(select(User).where(User.is_admin.is_(False))).one().email
+    # is_admin=False now matches both the demo and eval users (seed-users
+    # creates three), so narrow to the real (non-synthetic) demo account.
+    demo_email = (
+        db.scalars(select(User).where(User.is_admin.is_(False), User.is_synthetic.is_(False)))
+        .one()
+        .email
+    )
 
     new_ep_result = runner.invoke(cli, ["new-episode", "--user", demo_email])
     assert new_ep_result.exit_code == 0, new_ep_result.output

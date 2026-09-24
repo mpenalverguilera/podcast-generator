@@ -72,6 +72,22 @@ class Script(BaseModel):
     sections: list[Section]
 
 
+class UnsupportedClaim(BaseModel):
+    """One flagged claim from the grounding check (ARCHITECTURE §5.5 /
+    docs/phases/04-quality.md Part A). Indices are into the *checked* Script's
+    own `sections`/`turns` lists, so a claim can be located directly."""
+
+    section_index: int
+    turn_index: int
+    claim: str
+    reason: str
+    suggested_fix: str
+
+
+class GroundingReport(BaseModel):
+    unsupported: list[UnsupportedClaim] = Field(default_factory=list, max_length=30)
+
+
 class Usage(BaseModel):
     provider: str
     model: str | None = None

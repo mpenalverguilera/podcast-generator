@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters import Adapters
 from app.config import get_settings
-from app.models import Article, Episode, EpisodeItem, Preferences
+from app.models import Article, Episode, EpisodeItem, PipelineStep, Preferences, StepStatus
+from app.pipeline import grounding
 from app.prompts import load_prompt
 from app.schemas import RenderedPrompt, Script, Usage
 
@@ -127,6 +128,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     )
     errors = validate_script(script, episode.target_minutes, selected_ids)
     total_usage = usage
+    final_prompt = prompt
 
     if errors:
         logger.info("episode %s script validation failed, retrying once: %s", episode.id, errors)
@@ -146,6 +148,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
         errors = validate_script(script, episode.target_minutes, selected_ids)
         if errors:
             raise RuntimeError(f"script validation failed after retry: {'; '.join(errors)}")
+        final_prompt = retry_prompt
         total_usage = Usage(
             provider=usage.provider,
             model=usage.model,
@@ -157,16 +160,100 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
             usage_source=usage.usage_source,
         )
 
+    # Grounding check (podcast-script skill / ARCHITECTURE §5.5, second pass):
+    # not a top-level STAGE_ORDER stage, so it isn't logged by runner.py --
+    # script.py writes its own `pipeline_steps` row below (docs/DECISIONS.md
+    # D-30). Sources are the same selected articles' content/highlights the
+    # script was written from, keyed the same way (short_id).
+    sources = {
+        short_id(article_id): (article.content or "\n".join(article.highlights or []))[
+            :_ARTICLE_TEXT_LIMIT
+        ]
+        for article_id, article in articles.items()
+    }
+    initial_report, grounding_usage_1 = grounding.check(script, sources, adapters.llm, settings)
+    grounding_usages = [grounding_usage_1]
+    episode.grounding_flags_initial = [c.model_dump() for c in initial_report.unsupported]
+    final_report = initial_report
+
+    if initial_report.unsupported:
+        logger.info(
+            "episode %s grounding check flagged %d claim(s), revising once",
+            episode.id,
+            len(initial_report.unsupported),
+        )
+        revision_prompt = RenderedPrompt(
+            name=final_prompt.name,
+            version=final_prompt.version,
+            text=final_prompt.text
+            + "\n\nA grounding check found these unsupported claims in your previous draft -- "
+            "revise the script to fix them, using only facts from the given articles:\n"
+            + grounding.format_issues(initial_report),
+        )
+        revised_script, revision_usage = adapters.llm.structured(
+            revision_prompt,
+            Script,
+            model=settings.model_script,
+            reasoning=settings.model_script_reasoning,
+        )
+        revision_errors = validate_script(revised_script, episode.target_minutes, selected_ids)
+        if revision_errors:
+            logger.warning(
+                "episode %s grounding revision produced an invalid script (%s); keeping the "
+                "pre-revision script",
+                episode.id,
+                "; ".join(revision_errors),
+            )
+        else:
+            script = revised_script
+            total_usage = Usage(
+                provider=total_usage.provider,
+                model=total_usage.model,
+                units_in=total_usage.units_in + revision_usage.units_in,
+                units_out=total_usage.units_out + revision_usage.units_out,
+                cost_usd=total_usage.cost_usd + revision_usage.cost_usd,
+                cost_is_estimate=total_usage.cost_is_estimate,
+                latency_ms=total_usage.latency_ms + revision_usage.latency_ms,
+                usage_source=total_usage.usage_source,
+            )
+            final_report, grounding_usage_2 = grounding.check(
+                script, sources, adapters.llm, settings
+            )
+            grounding_usages.append(grounding_usage_2)
+
+    episode.grounding_flags_final = [c.model_dump() for c in final_report.unsupported]
+
     episode.script = script.model_dump()
     episode.title = script.title
     episode.summary = script.summary
     episode.prompt_versions = {**(episode.prompt_versions or {}), prompt.name: prompt.version}
 
+    grounding_total = grounding.sum_usage(grounding_usages)
+    db.add(
+        PipelineStep(
+            episode_id=episode.id,
+            stage="grounding",
+            status=StepStatus.SUCCESS,
+            provider=grounding_total.provider,
+            model=grounding_total.model,
+            units_in=grounding_total.units_in,
+            units_out=grounding_total.units_out,
+            cost_usd=grounding_total.cost_usd,
+            cost_is_estimate=grounding_total.cost_is_estimate,
+            usage_source=grounding_total.usage_source,
+            latency_ms=grounding_total.latency_ms,
+        )
+    )
+
     logger.info(
-        "episode %s scripted %d words across %d sections, cost=$%.4f",
+        "episode %s scripted %d words across %d sections, cost=$%.4f, "
+        "grounding flags initial=%d final=%d cost=$%.4f",
         episode.id,
         _word_count(script),
         len(script.sections),
         total_usage.cost_usd,
+        len(episode.grounding_flags_initial),
+        len(episode.grounding_flags_final),
+        grounding_total.cost_usd,
     )
     return total_usage

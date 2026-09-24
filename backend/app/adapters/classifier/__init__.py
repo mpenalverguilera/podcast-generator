@@ -13,5 +13,7 @@ def get_classifier(settings: Settings | None = None, override: str | None = None
     if provider == "openai":
         return LLMClassifier(get_llm(settings), settings)
     if provider == "jev":
-        raise NotImplementedError("JevClassifier lands in phase 04")
+        # Cut from phase 04 per its own "cut first" line and README's "Jev
+        # optional" -- see docs/DECISIONS.md D-31. Not built anywhere yet.
+        raise NotImplementedError("JevClassifier is not built; cut from phase 04, see D-31")
     raise ValueError(f"unknown classifier provider {provider!r}")

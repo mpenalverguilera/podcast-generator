@@ -40,6 +40,8 @@ uv run python -m app.cli --help                # pipeline CLI (plan, fetch, gene
 uv run pytest -q                               # tests (never hit real APIs)
 uv run ruff check . && uv run ruff format .    # lint/format
 uv run --project backend python scripts/smoke/<name>.py   # provider smoke tests, run from repo root
+uv run --project backend python eval/build_set.py --episode-id <id>       # phase 04 Part B, from repo root
+uv run --project backend ruff check --config backend/pyproject.toml eval/ # lint eval/ (no root ruff config)
 cd frontend && npm install && npm run dev      # web on :5173
 docker compose up --build                      # everything
 ```

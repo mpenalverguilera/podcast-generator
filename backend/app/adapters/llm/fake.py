@@ -42,6 +42,7 @@ _REGISTRY: dict[str, dict] = {
         "already_covered": False,
         "score": 0.64,
     },
+    "GroundingReport": {"unsupported": []},
     "QueryPlan": {
         "queries": [
             {

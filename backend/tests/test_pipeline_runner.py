@@ -26,10 +26,16 @@ def test_happy_path_reaches_ready(db) -> None:
     assert result.status == EpisodeStatus.READY
     assert result.ready_at is not None
 
+    # scripting writes its own extra "grounding" row directly (it's a
+    # sub-step, not a STAGE_ORDER stage -- docs/DECISIONS.md D-30), so there's
+    # one more row than STAGE_ORDER stages.
     steps = _steps_for(db, episode.id)
-    assert len(steps) == len(STAGE_ORDER)
+    assert len(steps) == len(STAGE_ORDER) + 1
     assert all(s.status == StepStatus.SUCCESS for s in steps)
-    assert [s.stage for s in steps] == [status.value for status, _ in STAGE_ORDER]
+    stage_names = {s.stage for s in steps}
+    assert stage_names == {status.value for status, _ in STAGE_ORDER} | {"grounding"}
+    assert episode.grounding_flags_initial == []
+    assert episode.grounding_flags_final == []
 
 
 def test_resume_from_failed_stage(db, monkeypatch) -> None:
@@ -46,14 +52,16 @@ def test_resume_from_failed_stage(db, monkeypatch) -> None:
     assert result.error == "boom"
 
     steps = _steps_for(db, episode.id)
-    assert [s.stage for s in steps] == [
+    assert {s.stage for s in steps} == {
         "planning",
         "fetching",
         "ranking",
         "extracting",
         "scripting",
+        "grounding",
         "voicing",
-    ]
+    }
+    assert steps[-1].stage == "voicing"
     assert all(s.status == StepStatus.SUCCESS for s in steps[:-1])
     assert steps[-1].status == StepStatus.FAILED
 
@@ -65,11 +73,13 @@ def test_resume_from_failed_stage(db, monkeypatch) -> None:
     assert result2.status == EpisodeStatus.READY
 
     steps2 = _steps_for(db, episode.id)
-    # 6 rows from the first (failed) run + 2 from the resume (voicing retried,
-    # then assembling) = 8. The retried stage legitimately gets a second row
-    # (its failed attempt is a real, billable event we keep); every stage
-    # before it was skipped, not re-run, so it keeps exactly one row.
-    assert len(steps2) == len(STAGE_ORDER) + 1
+    # 7 rows from the first (failed) run (6 STAGE_ORDER stages up to the
+    # failed voicing attempt, plus scripting's own extra "grounding" row) + 2
+    # from the resume (voicing retried, then assembling) = 9. The retried
+    # stage legitimately gets a second row (its failed attempt is a real,
+    # billable event we keep); every stage before it was skipped, not
+    # re-run, so it keeps exactly one row.
+    assert len(steps2) == len(STAGE_ORDER) + 2
     stage_counts: dict[str, int] = {}
     for s in steps2:
         stage_counts[s.stage] = stage_counts.get(s.stage, 0) + 1

@@ -28,7 +28,9 @@ cli = typer.Typer(help="Personal Podcast Generator pipeline CLI")
 _pwd_context = CryptContext(schemes=["bcrypt"])
 
 
-def _create_user_if_missing(db, email: str, password: str, is_admin: bool) -> None:
+def _create_user_if_missing(
+    db, email: str, password: str, is_admin: bool, is_synthetic: bool = False
+) -> None:
     existing = db.scalar(select(User).where(User.email == email))
     if existing:
         typer.echo(f"user {email} already exists (id={existing.id}), skipping")
@@ -39,7 +41,7 @@ def _create_user_if_missing(db, email: str, password: str, is_admin: bool) -> No
         email=email,
         password_hash=_pwd_context.hash(password),
         is_admin=is_admin,
-        is_synthetic=False,
+        is_synthetic=is_synthetic,
     )
     db.add(user)
     db.flush()
@@ -58,7 +60,11 @@ def _create_user_if_missing(db, email: str, password: str, is_admin: bool) -> No
 
 @cli.command("seed-users")
 def seed_users() -> None:
-    """Idempotently creates the admin and demo users from .env."""
+    """Idempotently creates the admin, demo, and classifier-eval users from
+    .env. The eval user (phase 04 Part B, docs/DECISIONS.md D-29) is
+    is_synthetic=True: it exists only to build the classifier eval set, not
+    as a demo account, so it stays out of "real" dashboard aggregates -- its
+    own profile/episodes are otherwise untouched here, only created."""
     settings = get_settings()
     with session_scope() as db:
         _create_user_if_missing(
@@ -72,6 +78,13 @@ def seed_users() -> None:
             settings.seed_user_email,
             settings.seed_user_password.get_secret_value(),
             is_admin=False,
+        )
+        _create_user_if_missing(
+            db,
+            settings.seed_eval_user_email,
+            settings.seed_eval_user_password.get_secret_value(),
+            is_admin=False,
+            is_synthetic=True,
         )
 
 
@@ -250,6 +263,39 @@ def transcript_cmd(episode_id: int = typer.Argument(..., help="Episode id to pri
     for section in script.sections:
         for turn in section.turns:
             typer.echo(f"{names[turn.speaker]}: {strip_audio_tags(turn.text)}")
+
+
+def _print_grounding_flags(label: str, flags: list[dict]) -> None:
+    typer.echo(f"  {label}: {len(flags)} unsupported claim(s)")
+    for c in flags:
+        typer.echo(f"    - section {c['section_index']} turn {c['turn_index']}: {c['claim']!r}")
+        typer.echo(f"      reason: {c['reason']}")
+        typer.echo(f"      suggested fix: {c['suggested_fix']}")
+
+
+@cli.command("grounding")
+def grounding_cmd(
+    episode_id: int = typer.Argument(..., help="Episode id to show the grounding report for"),
+) -> None:
+    """Prints the grounding-check report stored on an episode (written by the
+    scripting stage, phase 04 Part A) -- flags before and after the one
+    allowed revision pass."""
+    with session_scope() as db:
+        episode = db.get(Episode, episode_id)
+        if episode is None:
+            typer.echo(f"no episode with id {episode_id}", err=True)
+            raise typer.Exit(code=1)
+        if episode.grounding_flags_initial is None:
+            typer.echo(
+                f"episode {episode_id} has no grounding report yet (scripting hasn't run)", err=True
+            )
+            raise typer.Exit(code=1)
+        initial = episode.grounding_flags_initial
+        final = episode.grounding_flags_final or []
+
+    typer.echo(f"episode {episode_id} grounding report:")
+    _print_grounding_flags("initial", initial)
+    _print_grounding_flags("final", final)
 
 
 @cli.command("run")
