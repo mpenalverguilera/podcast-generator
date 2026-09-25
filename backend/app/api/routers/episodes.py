@@ -1,5 +1,4 @@
 import logging
-import threading
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -19,8 +18,12 @@ from app.api.schemas import (
 from app.auth import current_user, require_owner_or_admin
 from app.db import get_db
 from app.models import Article, Episode, EpisodeStatus, EpisodeTrigger, Event, PipelineStep, User
-from app.pipeline.episodes import create_episode, has_episode_in_progress
-from app.pipeline.runner import run_episode
+from app.pipeline.episodes import (
+    EpisodeConflict,
+    create_episode,
+    mark_resuming,
+    run_in_background,
+)
 from app.pipeline.script import strip_audio_tags
 from app.schemas import Script
 
@@ -29,31 +32,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/episodes", tags=["episodes"])
 
 
-def _run_in_background(episode_id: int) -> None:
-    """Background execution model (docs/DECISIONS.md): a plain daemon thread,
-    not FastAPI's BackgroundTasks or a task queue. The whole pipeline is one
-    blocking call (network + local ffmpeg work), and this is a single-process
-    app with no worker pool to hand it to (ARCHITECTURE §3/§8) -- a thread is
-    the simplest thing that lets the HTTP response return immediately."""
-    threading.Thread(target=run_episode, args=(episode_id,), daemon=True).start()
-
-
 @router.post("/generate", response_model=EpisodeCreated, status_code=status.HTTP_201_CREATED)
 def generate_episode(
     body: EpisodeGenerateRequest,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> EpisodeCreated:
-    if has_episode_in_progress(db, user.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "an episode is already in progress")
-
-    episode = create_episode(
-        db,
-        user,
-        focus=body.focus_request,
-        target_minutes=body.target_minutes,
-        trigger=EpisodeTrigger.MANUAL,
-    )
+    try:
+        episode = create_episode(
+            db,
+            user,
+            focus=body.focus_request,
+            target_minutes=body.target_minutes,
+            trigger=EpisodeTrigger.MANUAL,
+        )
+    except EpisodeConflict as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     db.add(
         Event(
             user_id=user.id,
@@ -69,7 +63,7 @@ def generate_episode(
     db.commit()
     episode_id = episode.id
 
-    _run_in_background(episode_id)
+    run_in_background(episode_id)
     return EpisodeCreated(
         id=episode_id, status=EpisodeStatus.PENDING.value, target_minutes=episode.target_minutes
     )
@@ -193,13 +187,20 @@ def retry_episode(
     if episode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "episode not found")
     require_owner_or_admin(episode, user)
-    if episode.status != EpisodeStatus.FAILED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "episode is not in a failed state")
 
-    logger.info("retrying episode %s from %s", episode.id, episode.failed_stage)
-    _run_in_background(episode.id)
+    # The status flips out of "failed" in the DB before the thread starts, so
+    # a second click (or a concurrent generate) gets a 409 instead of
+    # starting a second runner on the same episode.
+    try:
+        resume_at = mark_resuming(db, episode.id)
+    except EpisodeConflict as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    db.commit()
+
+    logger.info("retrying episode %s from %s", episode.id, resume_at.value)
+    run_in_background(episode.id)
     return EpisodeCreated(
-        id=episode.id, status=episode.status.value, target_minutes=episode.target_minutes
+        id=episode.id, status=resume_at.value, target_minutes=episode.target_minutes
     )
 
 

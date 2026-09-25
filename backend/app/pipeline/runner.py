@@ -13,6 +13,8 @@ from app.pipeline import STAGE_ORDER
 
 logger = logging.getLogger(__name__)
 
+STOPPED_AFTER = "stopped after"
+
 
 def _stage_index(status: EpisodeStatus) -> int:
     for i, (stage_status, _) in enumerate(STAGE_ORDER):
@@ -36,6 +38,10 @@ def _start_index(episode: Episode) -> int:
     if episode.status == EpisodeStatus.FAILED:
         if not episode.failed_stage:
             raise ValueError(f"episode {episode.id} is failed but has no failed_stage")
+        # "pending" = failed before the first stage ever ran (old startup
+        # recovery wrote this; docs/DECISIONS.md D-37).
+        if episode.failed_stage == EpisodeStatus.PENDING.value:
+            return 0
         return _stage_index(EpisodeStatus(episode.failed_stage))
     return _stage_index(episode.status)
 
@@ -151,9 +157,19 @@ def run_episode(
             if next_status == EpisodeStatus.READY:
                 episode.ready_at = datetime.now(UTC)
                 logger.info("episode %s ready: %r", episode.id, episode.title)
-            db.flush()
+            # Commit per stage, not once at the end: pollers see the current
+            # stage, and a crash or restart keeps every completed stage's
+            # output and pipeline_steps row (the spend really happened), so a
+            # retry resumes instead of starting over. docs/DECISIONS.md D-37.
+            db.commit()
 
             if stage_name == stop_after:
+                # Marks a deliberate stop so startup recovery can tell it from
+                # a crash and never auto-resumes it -- `--stop-after
+                # scripting` exists precisely to avoid paying for TTS.
+                # Cleared by the next successful stage. docs/DECISIONS.md D-38.
+                episode.error = f"{STOPPED_AFTER} {stage_name}"
+                db.commit()
                 logger.info("episode %s stopped after %s (--stop-after)", episode.id, stage_name)
                 return episode
 

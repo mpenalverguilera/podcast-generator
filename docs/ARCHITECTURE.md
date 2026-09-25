@@ -213,7 +213,8 @@ events           id, user_id, episode_id, type, payload JSONB, is_synthetic, cre
 
 ## 8. Scheduling
 - On startup, register an APScheduler job per user from `schedule_cron`; re-register when settings change.
-- Per-user guard: no new episode while one is in progress.
+- Per-user guard: no new episode while one is in progress (a partial unique index, D-37).
+- Restarts (D-38): on boot every in-progress episode is an orphan, so it is marked failed ("interrupted") and auto-resumed once from its stage; a cron fire missed while the process was down triggers exactly one catch-up run; `misfire_grace_time` is one hour so a late fire (e.g. after laptop sleep) still runs.
 - `POST /episodes/generate` runs the same pipeline as a background task.
 - Limitation for `solution.md`: two API instances would run jobs twice. Fix: DB advisory lock or a queue with a worker. Exa Monitors could run scheduled searches server-side, but need a public webhook; rejected for a local-first build.
 

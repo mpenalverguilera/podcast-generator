@@ -6,13 +6,13 @@ before start() still showed up in get_job() afterwards), so sync/removal are
 only reliably testable against a running scheduler. Cron intervals here are
 far enough out (daily/hourly) that nothing actually fires during the test."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 
 from app.models import Episode, EpisodeStatus, EpisodeTrigger, Preferences, User
-from app.scheduler import run_scheduled_episode, scheduler, sync_user_schedule
+from app.scheduler import catch_up_due, run_scheduled_episode, scheduler, sync_user_schedule
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -82,3 +82,62 @@ def test_run_scheduled_episode_skips_when_one_is_in_progress(db) -> None:
         )
     )
     assert scheduled_episode_id is None, "a scheduled run must not start while one is in progress"
+
+
+# A Sunday; the catch-up tests use a daily 08:00 UTC schedule around it.
+_SUNDAY_8AM = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
+_DAILY_8AM = "0 8 * * *"
+
+
+def _scheduled_user(db, *, schedule_set_at: datetime, last_run_at: datetime | None) -> User:
+    user = User(email="catchup@example.com", password_hash="x", is_admin=False)
+    db.add(user)
+    db.flush()
+    db.add(
+        Preferences(
+            user_id=user.id, schedule_cron=_DAILY_8AM, timezone="UTC", updated_at=schedule_set_at
+        )
+    )
+    if last_run_at is not None:
+        db.add(
+            Episode(
+                user_id=user.id,
+                status=EpisodeStatus.READY,
+                trigger=EpisodeTrigger.SCHEDULE,
+                window_start=last_run_at - timedelta(days=1),
+                target_minutes=6,
+                created_at=last_run_at,
+            )
+        )
+    db.commit()
+    return user
+
+
+def test_catch_up_due_after_multi_day_downtime(db) -> None:
+    """Down all Monday and Tuesday, back Wednesday 10:00: a run was missed,
+    and the answer is a single yes (one catch-up), not one per missed day."""
+    user = _scheduled_user(
+        db, schedule_set_at=_SUNDAY_8AM - timedelta(days=7), last_run_at=_SUNDAY_8AM
+    )
+    wednesday_10am = _SUNDAY_8AM + timedelta(days=3, hours=2)
+    assert catch_up_due(db, user.id, _DAILY_8AM, "UTC", now=wednesday_10am) is True
+
+
+def test_catch_up_not_due_before_the_next_fire(db) -> None:
+    user = _scheduled_user(
+        db, schedule_set_at=_SUNDAY_8AM - timedelta(days=7), last_run_at=_SUNDAY_8AM
+    )
+    monday_7am = _SUNDAY_8AM + timedelta(hours=23)
+    assert catch_up_due(db, user.id, _DAILY_8AM, "UTC", now=monday_7am) is False
+
+
+def test_catch_up_anchors_on_schedule_change_when_never_run(db) -> None:
+    """A schedule set Sunday 09:00 has not missed Sunday 08:00."""
+    user = _scheduled_user(db, schedule_set_at=_SUNDAY_8AM + timedelta(hours=1), last_run_at=None)
+    assert (
+        catch_up_due(db, user.id, _DAILY_8AM, "UTC", now=_SUNDAY_8AM + timedelta(hours=2)) is False
+    )
+    assert (
+        catch_up_due(db, user.id, _DAILY_8AM, "UTC", now=_SUNDAY_8AM + timedelta(days=1, hours=1))
+        is True
+    )

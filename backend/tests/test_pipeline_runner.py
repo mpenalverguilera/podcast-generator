@@ -108,3 +108,42 @@ def test_logs_stage_entry_and_failure_at_error_level(db, monkeypatch, caplog) ->
     failure_records = [r for r in caplog.records if "stage voicing failed" in r.message]
     assert len(failure_records) == 1
     assert failure_records[0].levelno == logging.ERROR
+
+
+class _ProcessKilled(BaseException):
+    """Stands in for the process dying mid-stage: a BaseException, so the
+    runner's `except Exception` doesn't turn it into a clean stage failure."""
+
+
+def test_crash_mid_run_keeps_completed_stages(db, monkeypatch) -> None:
+    """Each stage is committed as it completes (docs/DECISIONS.md D-37): a
+    crash during voicing must leave the episode at voicing with every earlier
+    stage's pipeline_steps row persisted, not rolled back to pending."""
+    episode = make_user_with_episode(db)
+
+    def _killed(*_args, **_kwargs):
+        raise _ProcessKilled
+
+    monkeypatch.setattr(voice_stage, "run", _killed)
+    try:
+        run_episode(episode.id)
+    except _ProcessKilled:
+        pass
+
+    db.refresh(episode)
+    assert episode.status == EpisodeStatus.VOICING
+    assert {"planning", "fetching", "ranking", "extracting", "scripting"} <= {
+        s.stage for s in _steps_for(db, episode.id)
+    }
+
+
+def test_stop_after_marks_the_pause(db) -> None:
+    episode = make_user_with_episode(db)
+
+    run_episode(episode.id, stop_after="planning")
+    db.refresh(episode)
+    assert (episode.status, episode.error) == (EpisodeStatus.FETCHING, "stopped after planning")
+
+    run_episode(episode.id)
+    db.refresh(episode)
+    assert (episode.status, episode.error) == (EpisodeStatus.READY, None)

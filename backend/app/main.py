@@ -10,7 +10,7 @@ from app.api.routers import auth, episodes, events, preferences
 from app.config import get_settings
 from app.db import session_scope
 from app.logging_setup import configure_logging
-from app.scheduler import recover_stuck_episodes_now, shutdown_scheduler, start_scheduler
+from app.scheduler import recover_and_resume, shutdown_scheduler, start_scheduler
 
 configure_logging(get_settings().log_level)
 
@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    recovered = recover_stuck_episodes_now()
-    if recovered:
-        logger.warning("startup recovery: marked %d stuck episode(s) failed", recovered)
+    # Order matters (docs/DECISIONS.md D-38): recover orphans first so they
+    # stop blocking their users, resume them, and only then register cron
+    # jobs, whose catch-up runs skip any user with a resumed episode running.
+    resumed = recover_and_resume()
+    if resumed:
+        logger.warning("startup recovery: auto-resumed %d interrupted episode(s)", resumed)
     start_scheduler()
     logger.info("API started")
     yield

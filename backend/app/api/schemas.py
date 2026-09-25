@@ -5,9 +5,12 @@ types (Script, Usage, ...) -- these are the HTTP contract, not pipeline data."""
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas import InterestProfile
+from app.voices import CURATED_VOICES
+
+CURATED_VOICE_IDS = {v.id for v in CURATED_VOICES}
 
 
 class LoginRequest(BaseModel):
@@ -54,8 +57,17 @@ class PreferencesOut(BaseModel):
 
 
 class HostIn(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=40)
     voice_id: str
+
+    @field_validator("voice_id")
+    @classmethod
+    def _curated_voice(cls, voice_id: str) -> str:
+        # Rejected here, not at the voicing stage -- by then planning,
+        # fetching, ranking and scripting would already have been paid for.
+        if voice_id not in CURATED_VOICE_IDS:
+            raise ValueError("voice_id must be one of GET /voices")
+        return voice_id
 
 
 class PreferencesUpdate(BaseModel):
@@ -64,7 +76,9 @@ class PreferencesUpdate(BaseModel):
 
     interest_profile: InterestProfile | None = None
     target_minutes: int | None = Field(default=None, ge=3, le=12)
-    tone: str | None = None
+    # The settings page's three options; free text here would be pasted
+    # straight into the script-writer prompt.
+    tone: Literal["conversational", "focused", "playful"] | None = None
     host_a: HostIn | None = None
     host_b: HostIn | None = None
     schedule_cron: str | None = None
@@ -143,6 +157,24 @@ class EpisodeDetail(BaseModel):
 
 
 class EventCreate(BaseModel):
-    type: str
-    episode_id: int | None = None
+    """Only the player/rating events a client may send. The server emits
+    generate_clicked, profile_updated and settings_changed itself, so a
+    client can't forge those into the phase-07 metrics. Every client event
+    is about one episode. Payload shapes: play_progress needs
+    {"position_s": number >= 0}; episode_rated needs {"value": 1 | -1}."""
+
+    type: Literal["play_started", "play_progress", "play_completed", "episode_rated"]
+    episode_id: int
     payload: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_payload(self) -> "EventCreate":
+        if self.type == "play_progress":
+            position = self.payload.get("position_s")
+            if not isinstance(position, int | float) or isinstance(position, bool) or position < 0:
+                raise ValueError("play_progress needs payload.position_s >= 0")
+        if self.type == "episode_rated":
+            value = self.payload.get("value")
+            if isinstance(value, bool) or value not in (1, -1):
+                raise ValueError("episode_rated needs payload.value of 1 or -1")
+        return self

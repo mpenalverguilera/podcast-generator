@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 from app.models import Event
+from app.voices import CURATED_VOICES
 from tests.api.conftest import auth_headers, client, login, make_user
 
 
@@ -41,13 +42,13 @@ def test_get_and_put_preferences(db) -> None:
 
     resp = client.put(
         "/preferences",
-        json={"target_minutes": 9, "tone": "punchy", "schedule_cron": "0 8 * * *"},
+        json={"target_minutes": 9, "tone": "playful", "schedule_cron": "0 8 * * *"},
         headers=auth_headers(token),
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["target_minutes"] == 9
-    assert body["tone"] == "punchy"
+    assert body["tone"] == "playful"
     assert body["schedule_cron"] == "0 8 * * *"
 
 
@@ -67,10 +68,36 @@ def test_put_preferences_rejects_invalid_cron(db) -> None:
     assert resp.status_code == 422
 
 
+def test_put_preferences_rejects_free_text_tone(db) -> None:
+    make_user(db, email="tone@example.com")
+    token = login("tone@example.com")
+    resp = client.put("/preferences", json={"tone": "punchy"}, headers=auth_headers(token))
+    assert resp.status_code == 422
+
+
+def test_put_preferences_validates_host_voice(db) -> None:
+    make_user(db, email="voice@example.com")
+    token = login("voice@example.com")
+    unknown = client.put(
+        "/preferences",
+        json={"host_a": {"name": "Alex", "voice_id": "not-a-curated-voice"}},
+        headers=auth_headers(token),
+    )
+    assert unknown.status_code == 422
+
+    curated = client.put(
+        "/preferences",
+        json={"host_a": {"name": "Alex", "voice_id": CURATED_VOICES[2].id}},
+        headers=auth_headers(token),
+    )
+    assert curated.status_code == 200, curated.text
+    assert curated.json()["host_a"]["voice_id"] == CURATED_VOICES[2].id
+
+
 def test_put_preferences_emits_settings_changed_event(db) -> None:
     user = make_user(db, email="events@example.com")
     token = login("events@example.com")
-    client.put("/preferences", json={"tone": "warm"}, headers=auth_headers(token))
+    client.put("/preferences", json={"tone": "focused"}, headers=auth_headers(token))
 
     events = db.scalars(select(Event).where(Event.user_id == user.id)).all()
     assert any(e.type == "settings_changed" for e in events)

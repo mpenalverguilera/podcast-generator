@@ -123,6 +123,11 @@ def test_retry_failed_episode(db) -> None:
 
     resp = client.post(f"/episodes/{episode.id}/retry", headers=auth_headers(token))
     assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "planning", "already out of 'failed' before the thread starts"
+
+    # A double click: the episode is no longer failed, so no second runner.
+    again = client.post(f"/episodes/{episode.id}/retry", headers=auth_headers(token))
+    assert again.status_code == 409, again.text
 
     detail = _poll_until_terminal(token, episode.id, stale=("failed", "planning"))
     assert detail["status"] == "ready", detail
@@ -143,3 +148,23 @@ def test_retry_non_failed_episode_is_409(db) -> None:
 def test_episodes_require_auth(db) -> None:
     assert client.get("/episodes").status_code == 401
     assert client.post("/episodes/generate", json={}).status_code == 401
+
+
+def test_retry_conflicts_with_another_running_episode(db) -> None:
+    user = make_user(db, email="retry-busy@example.com")
+    token = login("retry-busy@example.com")
+    common = dict(
+        user_id=user.id,
+        trigger=EpisodeTrigger.MANUAL,
+        window_start=datetime.now(UTC),
+        target_minutes=6,
+    )
+    failed = Episode(status=EpisodeStatus.FAILED, failed_stage="planning", **common)
+    running = Episode(status=EpisodeStatus.VOICING, **common)
+    db.add_all([failed, running])
+    db.commit()
+
+    resp = client.post(f"/episodes/{failed.id}/retry", headers=auth_headers(token))
+    assert resp.status_code == 409, resp.text
+    db.refresh(failed)
+    assert failed.status == EpisodeStatus.FAILED

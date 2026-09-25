@@ -7,12 +7,14 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -25,6 +27,9 @@ def _pg_enum(enum_cls: type[enum.Enum], name: str) -> Enum:
     # default, not .value ("pending"). ARCHITECTURE §5/§7 specify lowercase
     # values, so every native enum column must override this explicitly.
     return Enum(enum_cls, name=name, values_callable=lambda obj: [e.value for e in obj])
+
+
+IN_PROGRESS_INDEX = "uq_episodes_one_in_progress_per_user"
 
 
 class EpisodeStatus(enum.StrEnum):
@@ -128,6 +133,18 @@ class ArticleScore(Base):
 
 class Episode(Base):
     __tablename__ = "episodes"
+    # At most one in-progress episode per user, enforced by Postgres rather
+    # than a check-then-insert in Python, which two concurrent callers (a
+    # double-clicked Generate, a cron run racing a click) could both pass.
+    # docs/DECISIONS.md D-37.
+    __table_args__ = (
+        Index(
+            IN_PROGRESS_INDEX,
+            "user_id",
+            unique=True,
+            postgresql_where=text("status NOT IN ('ready', 'failed')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)

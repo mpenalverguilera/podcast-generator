@@ -20,6 +20,7 @@ from app.models import (
     Preferences,
     User,
 )
+from app.pipeline.episodes import EpisodeConflict
 from app.pipeline.episodes import create_episode as _create_episode_row
 from app.pipeline.profile import extract_profile
 from app.pipeline.runner import run_episode
@@ -147,9 +148,13 @@ def _create_episode(db, user: str, focus: str | None, minutes: int | None) -> in
         typer.echo(f"no user with email {user!r}; run seed-users first", err=True)
         raise typer.Exit(code=1)
 
-    episode = _create_episode_row(
-        db, owner, focus=focus, target_minutes=minutes, trigger=EpisodeTrigger.MANUAL
-    )
+    try:
+        episode = _create_episode_row(
+            db, owner, focus=focus, target_minutes=minutes, trigger=EpisodeTrigger.MANUAL
+        )
+    except EpisodeConflict as exc:
+        typer.echo(f"{user}: {exc}; finish it with `run <id>` or let it fail first", err=True)
+        raise typer.Exit(code=1) from exc
     return episode.id
 
 
