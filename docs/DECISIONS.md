@@ -439,3 +439,26 @@ Alternatives (this point): stacking a proper new incremental revision instead of
 correct choice now that the project has a real, already-migrated database; not done here in order
 to stay consistent with D-30's existing precedent in the same file, but flagged above as worth
 revisiting rather than silently repeating a fragile pattern a third time.
+
+**7. Follow-up, worth doing before trusting Jev's numbers further: the eval measures nothing about
+Jev's failure rate.** Point 6's real run hit Vercel AI Gateway's intermittent `503` three times
+before a retry-with-backoff (`score_with_retry`, notebook-only) got past it; that retry logic
+means a failed HTTP call never produces a `Usage` at all (`JevClassifier.score()` raises before
+`return`), so `scores_jev.jsonl` and every metric derived from it — the keep-gate AUC, selection
+precision, and the p50/p95 latency table in point 6 — reflect **only successful calls**. Checked
+directly: the run that produced the final 60 cached rows needed **zero** retries (all the observed
+`503`s happened in earlier attempts, before the retry wrapper existed, and those failed calls left
+no trace in the cache), so this run's reported numbers happen to be uncontaminated by retries. But
+the underlying failure rate itself — roughly 1-in-2 to 1-in-30 requests across the three earlier
+attempts — was real, and it's exactly the risk `FallbackClassifier` (point 5) exists to cover in
+production, yet nothing in `eval/results/latest.md` or the non-inferiority table quantifies it.
+Two gaps this leaves: (a) the eval's cost and latency numbers implicitly assume Jev's happy path,
+not its true unconditional cost/latency including retries and fallbacks; (b) there's no measured
+baseline for how often `PipelineStep.fallback_count` should be expected to be nonzero once Jev is
+live, so a real episode's fallback count can't yet be judged "normal" vs "something's wrong."
+Follow-up, not done here (out of scope for a labeling-and-metrics session): instrument
+`score_with_retry`-equivalent behavior into a real eval axis — e.g. re-run a sample of Jev calls
+enough times to estimate an empirical failure rate with a confidence interval, and report expected
+cost/latency *including* the fallback path's own cost when it fires, not just Jev's success-path
+numbers — before leaning on this eval's cost/latency comparison for anything beyond "directionally
+much cheaper and faster than Luna."
