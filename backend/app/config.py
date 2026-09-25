@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     elevenlabs_api_key: SecretStr | None = None
     exa_api_key: SecretStr | None = None
     # Jev (TypeSafe) is only reachable through Vercel's AI Gateway, not TypeSafe's own API --
-    # see docs/DECISIONS.md D-33 (D-32's direct-SDK integration used the wrong key/endpoint).
+    # see docs/DECISIONS.md D-38 (D-37's direct-SDK integration used the wrong key/endpoint).
     ai_gateway_api_key: SecretStr | None = None
     search_provider: Literal["exa", "fake"] = "exa"
     llm_provider: Literal["openai", "fake"] = "openai"
@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     model_grounding: str = "gpt-6-luna"
     model_grounding_reasoning: str = "low"
     # Vercel AI Gateway model slug (provider/model), not a TypeSafe-native version string
-    # (D-33). Pinned rather than an alias so classifier eval numbers stay reproducible.
+    # (D-38). Pinned rather than an alias so classifier eval numbers stay reproducible.
     model_jev: str = "typesafe-ai/jev"
-    # D-34: the real eval (eval/results/latest.md) found Jev non-inferior to Luna on the
+    # D-39: the real eval (eval/results/latest.md) found Jev non-inferior to Luna on the
     # production keep gate, ~2x cheaper and ~5x faster p50 -- now the default, with a per-article
     # fallback to Luna (FallbackClassifier, app/adapters/classifier/__init__.py) on Jev errors.
     classifier_provider: Literal["openai", "jev", "fake"] = "jev"

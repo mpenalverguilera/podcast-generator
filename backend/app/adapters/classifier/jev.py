@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from app.models import Article
 
 # Jev (TypeSafe) is only reachable through Vercel's AI Gateway, not TypeSafe's own API -- the
-# TYPESAFE_API_KEY/typesafe-sdk integration in docs/DECISIONS.md D-32 was hitting the wrong
-# service entirely, hence its 401. See D-33 and
+# TYPESAFE_API_KEY/typesafe-sdk integration in docs/DECISIONS.md D-37 was hitting the wrong
+# service entirely, hence its 401. See D-38 and
 # https://vercel.com/docs/ai-gateway/modalities/evaluation for the request/response shape.
 _BASE_URL = "https://ai-gateway.vercel.sh"
 _EVALUATE_PATH = "/v1/evaluate"
@@ -97,7 +97,7 @@ def _build_request(
 
 class JevClassifier:
     """Real Classifier backed by TypeSafe's Jev, served through Vercel AI Gateway's evaluation
-    API (D-33). One POST per (article, topic): a `choice` question over the profile's topic(s)
+    API (D-38). One POST per (article, topic): a `choice` question over the profile's topic(s)
     plus "none" gives `relevance` -- rank.py already restricts `profile` to the single topic
     being scored before calling any classifier (D-23/D-25's per-topic re-check), so in practice
     this is a one-topic-vs-"none" choice, not a full re-classification across every topic -- a

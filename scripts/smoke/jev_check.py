@@ -1,4 +1,4 @@
-"""Smoke test: Jev via Vercel AI Gateway (docs/DECISIONS.md D-33).
+"""Smoke test: Jev via Vercel AI Gateway (docs/DECISIONS.md D-38).
 
 Confirms:
 - AI_GATEWAY_API_KEY loads from .env and authenticates against https://ai-gateway.vercel.sh

@@ -34,7 +34,7 @@ def test_defaults_match_dot_env_example() -> None:
     defaults = {name: field.default for name, field in Settings.model_fields.items()}
     assert defaults["search_provider"] == "exa"
     assert defaults["llm_provider"] == "openai"
-    assert defaults["classifier_provider"] == "jev"  # D-34: Jev is the default classifier
+    assert defaults["classifier_provider"] == "jev"  # D-39: Jev is the default classifier
     assert defaults["tts_provider"] == "elevenlabs"
     assert defaults["max_tts_chars_per_episode"] == 12000
     assert defaults["daily_spend_cap_usd"] == 5.0

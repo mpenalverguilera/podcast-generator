@@ -13,7 +13,7 @@ from app.models import Article
 from app.schemas import InterestProfile, Topic
 
 # A real /v1/evaluate response, captured once against the live Vercel AI Gateway and committed
-# with no secrets in it (docs/DECISIONS.md D-33) -- what gets tested is exactly the shape the
+# with no secrets in it (docs/DECISIONS.md D-38) -- what gets tested is exactly the shape the
 # gateway returns, not a hand-guessed one.
 FIXTURE = json.loads(
     Path(__file__).parent.joinpath("fixtures/jev_evaluate.json").read_text(encoding="utf-8")
@@ -102,7 +102,7 @@ def test_missing_key_raises() -> None:
 
 
 def test_factory_returns_jev_wrapped_in_fallback() -> None:
-    """D-34: classifier_provider="jev" returns Jev wrapped in a per-article fallback to Luna,
+    """D-39: classifier_provider="jev" returns Jev wrapped in a per-article fallback to Luna,
     not a bare JevClassifier -- so a Jev outage degrades one candidate's score, not the stage."""
     settings = Settings(classifier_provider="jev", ai_gateway_api_key="agw-test")
     classifier = get_classifier(settings)

@@ -14,7 +14,7 @@ class FallbackClassifier:
     """Wraps a `primary` Classifier with a `fallback`: any exception from `primary.score()`
     (a timeout, an HTTP error, a malformed response) scores that one article with `fallback`
     instead, rather than failing the whole ranking stage over one candidate. Used to make Jev
-    (`docs/DECISIONS.md` D-34, selected as the default classifier over Luna) safe to run as the
+    (`docs/DECISIONS.md` D-39, selected as the default classifier over Luna) safe to run as the
     production default: a Jev outage degrades one article's score to Luna's, not the episode.
 
     `Usage.fallback_count` is set to 1 on the returned `Usage` whenever the fallback fired (0 on
