@@ -119,7 +119,7 @@ class JevClassifier:
                     ),
                     "Content-Type": "application/json",
                 },
-                timeout=30.0,
+                timeout=self._settings.jev_timeout_s,
             )
         self._client = client
 

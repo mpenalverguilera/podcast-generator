@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from app.adapters.classifier import get_classifier
+from app.adapters.classifier.fallback import FallbackClassifier
 from app.adapters.classifier.jev import JevClassifier
 from app.config import Settings
 from app.models import Article
@@ -100,6 +101,10 @@ def test_missing_key_raises() -> None:
         JevClassifier(Settings(ai_gateway_api_key=None))
 
 
-def test_factory_returns_jev() -> None:
+def test_factory_returns_jev_wrapped_in_fallback() -> None:
+    """D-34: classifier_provider="jev" returns Jev wrapped in a per-article fallback to Luna,
+    not a bare JevClassifier -- so a Jev outage degrades one candidate's score, not the stage."""
     settings = Settings(classifier_provider="jev", ai_gateway_api_key="agw-test")
-    assert isinstance(get_classifier(settings), JevClassifier)
+    classifier = get_classifier(settings)
+    assert isinstance(classifier, FallbackClassifier)
+    assert isinstance(classifier._primary, JevClassifier)

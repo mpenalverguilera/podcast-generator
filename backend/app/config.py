@@ -50,7 +50,11 @@ class Settings(BaseSettings):
     # Vercel AI Gateway model slug (provider/model), not a TypeSafe-native version string
     # (D-33). Pinned rather than an alias so classifier eval numbers stay reproducible.
     model_jev: str = "typesafe-ai/jev"
-    classifier_provider: Literal["openai", "jev", "fake"] = "openai"
+    # D-34: the real eval (eval/results/latest.md) found Jev non-inferior to Luna on the
+    # production keep gate, ~2x cheaper and ~5x faster p50 -- now the default, with a per-article
+    # fallback to Luna (FallbackClassifier, app/adapters/classifier/__init__.py) on Jev errors.
+    classifier_provider: Literal["openai", "jev", "fake"] = "jev"
+    jev_timeout_s: float = 30.0
 
     # TTS
     tts_provider: Literal["elevenlabs", "fake"] = "elevenlabs"

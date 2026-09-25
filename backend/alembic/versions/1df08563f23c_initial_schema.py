@@ -224,6 +224,10 @@ def upgrade() -> None:
         sa.Column("usage_source", sa.String(), nullable=True),
         sa.Column("provider_request_id", sa.String(), nullable=True),
         sa.Column("latency_ms", sa.Integer(), nullable=True),
+        # D-34: how many candidates in this stage fell back from Jev to Luna
+        # (FallbackClassifier). Nullable like the other per-stage analytics columns above;
+        # meaningful only for the ranking stage once classifier_provider="jev", 0 elsewhere.
+        sa.Column("fallback_count", sa.Integer(), nullable=True),
         sa.Column(
             "started_at",
             sa.DateTime(timezone=True),

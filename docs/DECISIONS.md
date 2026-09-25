@@ -327,3 +327,115 @@ margins — rejected (same session, user's instruction): report it, don't gate o
 makes the CI itself too wide to be a useful gate at this margin.
 Consequences: results, the actual Jev pass/fail table, and the final default-classifier choice are
 appended below once the real "Restart & Run All" (or its nbconvert equivalent) completes.
+
+**6. Results (real run, 2026-09-25).** Executed via `jupyter nbconvert --to notebook --execute
+--inplace eval/classifier_eval.ipynb` (this sandbox still can't spawn an interactive Jupyter
+kernel for `jupyter lab`, D-31's limitation, but nbconvert's own kernel works fine). Confirmed
+against the eval user's real saved profile (a DB read): the disputed relevance calls from the
+label review (the Fed-policy speech, the board-game-convention articles) do match the saved
+`interest_profile`'s `include` lists, resolving D-31's `[VERIFY]` item for real this time.
+
+Vercel AI Gateway's `/v1/evaluate` returned an intermittent `503` partway through Jev's 60 calls,
+three times in a row across separate `nbconvert` invocations (1, then +30, then +1 rows before
+failing again). Checked before assuming free-tier throttling: Vercel's status page showed AI
+Gateway fully operational; a public GitHub issue titled "Intermittent Vercel HTTP 503 pauses JEV
+categorization every few dozen articles" describes the identical symptom and calls it a backing-
+service problem (the `typesafe-ai` provider behind the gateway), not a Vercel-side rate limit —
+free-tier throttling returns `429` with a `rate_limit_exceeded` body per Vercel's own rate-limits
+docs, not `503`. Added retry-with-exponential-backoff on `{502, 503, 504}` (`score_with_retry`,
+notebook-only, not a production adapter change) rather than continuing to re-invoke `nbconvert` by
+hand; the retry cleared it. This risk (a backing-service 503, not a quota wall) is separate from
+D-34's production `FallbackClassifier` below, which exists for the same class of failure in
+production, not just in this eval.
+
+Final counts: `luna`/`luna_rerun`/`sol`/`jev` each scored all 60 rows. Total spend **$0.1925**
+(under the $0.25 budget) — Luna $0.0086, Luna rerun $0.0086, Sol $0.1716, Jev $0.0038. Verified
+idempotent: a second `nbconvert` run made 0 new calls and reproduced identical numbers and verdict.
+
+| classifier | keep P | keep R | keep ROC-AUC | rel. ROC-AUC | news ROC-AUC | sel. prec. | p50 ms | p95 ms | $/100 |
+|---|---|---|---|---|---|---|---|---|---|
+| luna (current default) | 0.85 | 1.00 | 0.91 | 0.76 | 0.89 | 0.75 | 1875 | 4109 | $0.014 |
+| luna_rerun (noise floor) | 0.83 | 1.00 | 0.89 | 0.59 | 0.90 | 0.75 | 1952 | 3655 | $0.014 |
+| sol | 0.91 | 1.00 | 0.99 | 0.78 | 0.99 | 1.00 | 2547 | 3656 | $0.286 |
+| jev | 0.97 | 0.87 | 0.96 | 0.71 | 0.99 | 1.00 | 403 | 978 | $0.006 |
+
+Luna-vs-Luna rerun keep-gate disagreement (the noise floor): 3/60 rows. Selection agreement
+(Jaccard vs Luna, 8 stories): `luna_rerun`=0.60, `sol`=0.33, `jev`=0.14. Oracle selection precision
+(the best any classifier could score against these labels): 1.00.
+
+**Sol vs Luna: SELECTED.** Selection agreement is 0.33 (< 0.7) and Sol's largest gain is +0.25 on
+selection precision (>= 0.10) — worth ~20x the cost per D-29's rule.
+
+**Jev vs Luna: SELECTED**, all four D-34 non-inferiority conditions pass:
+
+| condition | value | threshold | pass |
+|---|---|---|---|
+| keep_gate_auc_delta | +0.051 | ≥ −0.05 | yes |
+| keep_gate_discordant_net | −1 | ≤ 3 | yes |
+| selection_precision_gap | +0.25 | ≥ −0.125 | yes |
+| cost_and_latency | $0.006 < $0.014/100, p50 403ms ≤ 1875ms | — | yes |
+
+The discordant net is negative: Jev actually corrects one more row than it breaks relative to
+Luna. Bootstrap 95% CI on the keep-gate AUC gap (informational, not gating): +0.051 [−0.049,
++0.175] — the point estimate is a real gain, though the interval (as expected at n=60) is wide
+enough that "no loss" is the safer reading than "a proven gain."
+
+**Both Sol and Jev clear their bars. Jev wins the tie-break** (`min(cost_per_100)`): **jev is the
+new default classifier** (`classifier_provider` default changed `openai` → `jev` in `config.py`).
+Jev is not just non-inferior here — on this eval set it has a higher keep-gate ROC-AUC than Luna
+(0.96 vs 0.91), matches Sol's selection precision (1.00), at less than half Luna's cost and about
+4.7x Luna's p50 speed. Sol remains available (`classifier_provider=openai` +
+`MODEL_CLASSIFIER=gpt-6-sol`) but isn't made the default: it qualifies under D-29's rule, but Jev
+clears the same bar for a fraction of the cost, and D-29's own rule was written to prefer the
+cheaper option once both are legitimate.
+
+One number worth flagging rather than smoothing over: `jev`'s selection agreement with Luna is
+only 0.14 (the two picked almost entirely different stories) — by "agreement with the incumbent"
+alone this would look like a red flag. It isn't one here, because selection *precision* against
+the actual labels is 1.00 for Jev vs 0.75 for Luna: Jev disagrees with Luna by picking stories
+Luna missed, not by picking worse ones. This is exactly why D-34 point 2 added selection precision
+instead of relying on agreement-with-Luna alone — an agreement-only metric would have argued against the classifier that the labels say is actually better.
+
+**Fallback built** (since Jev was selected, per point 5 above): `FallbackClassifier`
+(`app/adapters/classifier/fallback.py`) wraps `primary.score()` in a bare `try/except Exception`
+and retries that one article with `fallback` on any error, tagging the returned `Usage` with
+`fallback_count=1` (0 on the primary's own success) so `rank.run` can sum it into the ranking
+stage's aggregate `Usage` the same way it already sums cost/units. `get_classifier("jev")` now
+returns `FallbackClassifier(JevClassifier(settings), LLMClassifier(get_llm(settings), settings))`
+— the fallback model is whatever `model_classifier` is configured to (still `gpt-6-luna`), not a
+second hardcoded string, so it stays the same "Luna" the eval measured against if `model_classifier`
+is ever changed for some other reason. `Settings.jev_timeout_s` (default 30s, matching the
+previous hardcoded value) replaces `jev.py`'s inline `timeout=30.0`, so the request timeout that
+triggers a fallback is configurable rather than buried in adapter code. `PipelineStep` and the
+initial-schema migration both get a new nullable `fallback_count` column (amending the single
+existing migration, per this repo's established convention — see the gotcha below). Tested with
+stub classifiers, no network (`tests/test_fallback_classifier.py`): the primary's success never
+calls the fallback; any exception from the primary calls the fallback exactly once, and its
+`Usage` (cost, latency, model) passes through unchanged except for `fallback_count=1`.
+
+**A migration gotcha, hit and fixed, worth flagging for whoever works on this repo next.** This
+project keeps one single "initial schema" Alembic revision and amends it in place for new columns
+(D-30 already did this for `grounding_flags_initial/final`) rather than stacking incremental
+revisions. That works cleanly for a *brand-new* database, but `alembic upgrade head` tracks
+applied state by revision **id**, not by diffing file content against the live schema — so on a
+database that was already migrated to `1df08563f23c` before this column was added (both the real
+dev DB, and the separate `<dbname>_test` DB the test suite creates via `Base.metadata.create_all`,
+D-11), `alembic upgrade head` reports nothing to do and the new `fallback_count` column silently
+never gets created, even though the migration file now includes it. This surfaced as a real
+`psycopg.errors.UndefinedColumn` failure in `test_cli.py`'s `test_new_episode_and_run` the first
+time the ranking stage ran for real (fake classifier, real DB) after this change. Fixed by hand
+for both live databases with an additive, non-destructive `ALTER TABLE pipeline_steps ADD COLUMN
+IF NOT EXISTS fallback_count INTEGER` (matching exactly what a fresh `alembic upgrade head` would
+have produced) rather than dropping and recreating either database, since the dev DB holds the
+real eval user's profile and fetched episodes this whole phase depends on. A fresh clone is
+unaffected — `alembic upgrade head` against an empty database runs the (already-amended)
+`upgrade()` in full and gets the column correctly. This convention should be revisited (either
+always stack a new revision, or add a "did you mean to bump the revision id" check) before this
+repo has a real deployed database where a silent no-op migration would be a production incident,
+not a caught-by-tests inconvenience.
+
+Alternatives (this point): stacking a proper new incremental revision instead of amending
+`1df08563f23c` again — would have avoided the gotcha above entirely, and is arguably the more
+correct choice now that the project has a real, already-migrated database; not done here in order
+to stay consistent with D-30's existing precedent in the same file, but flagged above as worth
+revisiting rather than silently repeating a fragile pattern a third time.

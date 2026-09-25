@@ -1,4 +1,5 @@
 from app.adapters.classifier.fake import FakeClassifier
+from app.adapters.classifier.fallback import FallbackClassifier
 from app.adapters.classifier.jev import JevClassifier
 from app.adapters.classifier.openai import LLMClassifier
 from app.adapters.classifier.protocol import Classifier
@@ -14,5 +15,10 @@ def get_classifier(settings: Settings | None = None, override: str | None = None
     if provider == "openai":
         return LLMClassifier(get_llm(settings), settings)
     if provider == "jev":
-        return JevClassifier(settings)
+        # D-34: Jev is the default classifier (cheaper, faster and non-inferior to Luna on the
+        # real eval), but falls back to Luna per article on any Jev error/timeout so a Jev
+        # outage degrades one candidate's score, not the whole ranking stage.
+        return FallbackClassifier(
+            JevClassifier(settings), LLMClassifier(get_llm(settings), settings)
+        )
     raise ValueError(f"unknown classifier provider {provider!r}")

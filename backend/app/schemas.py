@@ -98,6 +98,10 @@ class Usage(BaseModel):
     latency_ms: int = 0
     request_id: str | None = None
     usage_source: Literal["exact", "header", "estimated", "fake"] | None = None
+    # D-34: 1 on a single classifier call that fell back from Jev to Luna (FallbackClassifier),
+    # 0 otherwise; rank.run sums this into the ranking stage's aggregate Usage the same way it
+    # already sums units_in/units_out/cost_usd, so pipeline_steps.fallback_count is a real count.
+    fallback_count: int = 0
 
 
 class RenderedPrompt(BaseModel):
