@@ -1,6 +1,5 @@
 import json
 import logging
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -21,6 +20,7 @@ from app.models import (
     Preferences,
     User,
 )
+from app.pipeline.episodes import create_episode as _create_episode_row
 from app.pipeline.profile import extract_profile
 from app.pipeline.runner import run_episode
 from app.pipeline.script import strip_audio_tags
@@ -139,39 +139,16 @@ def profile_cmd(
 
 
 def _create_episode(db, user: str, focus: str | None, minutes: int | None) -> int:
-    """Shared by `new-episode` and `generate`: resolves the window start from
-    the user's last ready episode (or 7 days back for a first episode) and the
-    target length from the override or the user's saved preference."""
+    """Shared by `new-episode` and `generate`: looks up the user, then defers
+    to app.pipeline.episodes.create_episode (also used by the API and the
+    scheduler) for the window-start/target-minutes resolution."""
     owner = db.scalar(select(User).where(User.email == user))
     if owner is None:
         typer.echo(f"no user with email {user!r}; run seed-users first", err=True)
         raise typer.Exit(code=1)
 
-    last_ready = db.scalar(
-        select(Episode)
-        .where(Episode.user_id == owner.id, Episode.status == EpisodeStatus.READY)
-        .order_by(Episode.ready_at.desc())
-        .limit(1)
-    )
-    window_start = last_ready.ready_at if last_ready else datetime.now(UTC) - timedelta(days=7)
-    target_minutes = minutes or (owner.preferences.target_minutes if owner.preferences else 6)
-
-    episode = Episode(
-        user_id=owner.id,
-        status=EpisodeStatus.PENDING,
-        trigger=EpisodeTrigger.MANUAL,
-        focus_request=focus,
-        window_start=window_start,
-        target_minutes=target_minutes,
-    )
-    db.add(episode)
-    db.flush()
-    logger.info(
-        "created episode %s for %s (window_start=%s, target_minutes=%s)",
-        episode.id,
-        user,
-        window_start.date(),
-        target_minutes,
+    episode = _create_episode_row(
+        db, owner, focus=focus, target_minutes=minutes, trigger=EpisodeTrigger.MANUAL
     )
     return episode.id
 

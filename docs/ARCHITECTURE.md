@@ -1,6 +1,6 @@
 # Personal Podcast Generator — Architecture
 
-> Status: **v0.7**. Phase 00 (smoke test) confirmed the provider call shapes below; see `docs/DECISIONS.md` D-09. Remaining **[VERIFY]** items (e.g. Starlette range-request support) are outside phase 00's scope and stay open until the phase that needs them.
+> Status: **v0.8**. Phase 00 (smoke test) confirmed the provider call shapes below; see `docs/DECISIONS.md` D-09. Phase 05 confirmed Starlette's `FileResponse` handles `Range` requests natively (see D-36), resolving the last open **[VERIFY]** item.
 
 ## 1. Goals and priorities
 
@@ -209,7 +209,7 @@ events           id, user_id, episode_id, type, payload JSONB, is_synthetic, cre
                   play_progress, play_completed, episode_rated)
 ```
 
-`is_synthetic` marks seeded mock data, so the dashboard can show real vs mock honestly. Audio lives on disk, not in Postgres (big binaries bloat the DB; files serve range requests for seeking **[VERIFY]** Starlette `FileResponse` range support).
+`is_synthetic` marks seeded mock data, so the dashboard can show real vs mock honestly. Audio lives on disk, not in Postgres (big binaries bloat the DB; files serve range requests for seeking -- confirmed in phase 05 that Starlette's `FileResponse` handles `Range` natively, see D-36).
 
 ## 8. Scheduling
 - On startup, register an APScheduler job per user from `schedule_cron`; re-register when settings change.

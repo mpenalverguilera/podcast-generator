@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # Auth
     jwt_secret: SecretStr = SecretStr("change-me")
+    # Comma-separated allowed origins for CORS (the Vite dev server by default).
+    cors_origins: str = "http://localhost:5173"
     seed_admin_email: str = "admin@example.com"
     seed_admin_password: SecretStr = SecretStr("admin")
     seed_user_email: str = "demo@example.com"
@@ -65,6 +67,10 @@ class Settings(BaseSettings):
     # Logging -- terminal-only, architectural (stage transitions, not
     # per-request provider chatter); see app/logging_setup.py.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache
