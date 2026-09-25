@@ -96,7 +96,9 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     planned = [PlannedQuery.model_validate(q) for q in (episode.planned_queries or [])]
     if not planned:
         logger.warning("episode %s has no planned queries; nothing to fetch", episode.id)
-        return Usage(provider="exa", cost_is_estimate=False, usage_source="exact")
+        return Usage(
+            provider=adapters.search.provider, cost_is_estimate=False, usage_source="exact"
+        )
 
     # Network calls only happen inside the thread pool; every DB write happens
     # back on the main thread afterwards -- SQLAlchemy Sessions aren't thread-safe.
@@ -139,7 +141,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
         total_cost,
     )
     return Usage(
-        provider="exa",
+        provider=adapters.search.provider,
         units_in=len(linked_article_ids),
         cost_usd=total_cost,
         cost_is_estimate=False,

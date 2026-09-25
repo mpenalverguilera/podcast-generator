@@ -13,6 +13,8 @@ class FakeSearchSource:
     exa_contents.json) rather than inventing new ones, so the shape matches a
     real response exactly."""
 
+    provider = "fake"
+
     def __init__(self, fixtures_dir: Path | None = None) -> None:
         self._fixtures_dir = fixtures_dir or FIXTURES_DIR
         self._search_fixture = json.loads((self._fixtures_dir / "exa_search.json").read_text())

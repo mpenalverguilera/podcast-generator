@@ -105,7 +105,7 @@ def test_run_links_candidates_and_dedupes_by_article_and_topic(db) -> None:
     adapters = Adapters(search=FakeSearchSource(), llm=None, classifier=None, tts=None)  # type: ignore[arg-type]
     usage = fetch.run(episode, adapters, db)
 
-    assert usage.provider == "exa"
+    assert usage.provider == "fake"
     assert usage.cost_is_estimate is False
 
     scores = db.query(ArticleScore).filter(ArticleScore.episode_id == episode.id).all()
@@ -127,4 +127,5 @@ def test_run_with_no_planned_queries_returns_zero_cost(db) -> None:
     adapters = Adapters(search=FakeSearchSource(), llm=None, classifier=None, tts=None)  # type: ignore[arg-type]
     usage = fetch.run(episode, adapters, db)
 
+    assert usage.provider == "fake"
     assert usage.cost_usd == 0.0

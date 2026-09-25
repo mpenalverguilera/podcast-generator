@@ -14,6 +14,8 @@ class ExaSource:
     /search, top-level text on /contents, never category/numResults/domain
     filters/maxAgeHours."""
 
+    provider = "exa"
+
     def __init__(self, settings: Settings | None = None) -> None:
         settings = settings or get_settings()
         if not settings.exa_api_key:
