@@ -243,3 +243,87 @@ Decision:
 6. **The full three-way eval did not run.** `eval/articles.csv` (built for real from the eval user's real fetched episode, per D-31) exists but all 60 rows are still unlabeled (`label_relevant`/`label_newsworthy` empty) — confirmed by loading it and counting, in both the main checkout and this worktree (copied over, a plain file copy, not a secret). `classifier_eval.ipynb`'s own load-and-validate cell refuses to proceed past that point by design (D-29 point 2: "I label; you don't"), so metrics, selection agreement, and the default-classifier choice for Sol *and* Jev are still open. No classifier calls were made against the 60-row set for this reason — scoring them now, ahead of labeling, was considered (the cache means no double-spend once labels exist) but rejected as scope creep on a request that was about fixing Jev's transport, not about running ahead of the user's own labeling step.
 Alternatives: keeping `TYPESAFE_API_KEY` alongside the new `AI_GATEWAY_API_KEY` in case direct TypeSafe access becomes available later — rejected per the user's explicit "remove every reference to TypeSafe's direct API or the TypeSafe SDK"; if that changes, it's a new decision, not a speculative dual-path now. Sending `topic`'s criteria as nested objects (description + include + exclude) instead of a folded string — rejected because Vercel's `choice` question type's `criteria` is documented as a flat name → string map; the structured version goes into `state.topics` instead, where the model still sees it.
 Consequences: this fully resolves D-32's open `[VERIFY]` item — Jev's transport is fixed and proven live. What's left before the phase's Part B acceptance criteria are met is unchanged in kind from D-31/D-32, just narrower: the user labels `eval/articles.csv` in Excel (save as "CSV UTF-8"), and then the notebook (or, if this sandbox still can't spawn a Jupyter kernel per D-31, the same code run as a plain script from `eval/`) is run for real to produce `results/<date>.json`, `results/latest.md`, and the actual Sol/Jev default-classifier decision with numbers, recorded in a further decision entry once that happens.
+
+## D-34 — Label review, revised metrics, and a Jev non-inferiority rule fixed before running the real eval (2026-09-25, phase 04)
+Context: the user labeled `eval/articles.csv` by hand in Excel (D-31/D-33's outstanding step). The labeled file was saved into the main checkout, not this worktree (a plain copy, no secrets, byte-identical on every column but the three label columns). Before spending on the real three-way run, the user and the assistant reviewed all 60 labels together over three rounds, then fixed the metrics and the Jev decision rule — this entry records both, in that order, so the git history shows the rule was set before the numbers existed.
+
+**1. Label review.** Rules settled in conversation, applied consistently across all 60 rows:
+- Relevance means "would this listener actually want it for this topic", checked against the eval user's saved `interest_profile` (topic `description`/`include`/`exclude`), not just the free-text `eval_user_answers.json` used to generate it. Spot-checking the disputed rows (a Fed-policy speech, several board-game-convention articles) against the saved profile confirmed the review's calls: "economic policy" is explicitly in the finance topic's `include`, and "board game conventions" is explicitly in the tabletop topic's `include` — this also resolves the `[VERIFY]` item D-31 left open about checking against the saved profile rather than the free-text answers.
+- Index/listing/home pages (a site's front page, a program landing page, a launch-schedule aggregator) are always `R0 N0`, regardless of subject.
+- Newsworthy follows `classifier.v1.md`'s own definition: a real event (funding, launch, research, policy, results, studio/publisher news), not PR fluff, a listicle, an evergreen feature, or advice content. A first-party announcement of a real event (a company's own blog post about its own launch) still counts as newsworthy.
+- The same real-world event gets the same newsworthy label across every outlet covering it.
+
+21 of 60 label cells changed (16 rows touched, one previously-blank row filled in). Full before/after
+diff is in the commit for `eval/articles.csv`. Net result: **relevant 51/9, newsworthy 40/20, keep
+(relevant AND newsworthy) 39/21** — printed and asserted by the notebook's load cell.
+
+Two findings worth carrying into `solution.md`:
+- **Home renovation nets only 2 keepable rows out of 12** (the rest are evergreen "how I renovated my kitchen" features, which the profile's own `include: ["renovation stories"]` makes relevant but the classifier prompt's own newsworthy definition correctly marks as not-news). This is a real product finding, not a labeling artifact: Exa's feed for a hobby topic like this is mostly evergreen content, so under the current newsworthy definition it will rarely reach an episode. The fix, if wanted, is a per-topic "features count as news" flag or a topic-specific newsworthy prompt variant — a product/prompt change, out of this phase's scope, not something to paper over by relabeling.
+- **Relevance has only 9 negatives, and 8 of the 9 are index/junk pages that are also newsworthy=0.** Exa's own search already returns on-topic results reliably; newsworthy is where the classifier actually earns its cost. This is why the metrics below lead with a combined gate rather than relevance alone.
+
+**2. What n=60 supports, and the metric changes this implies (amends D-29 point 4).** With ~60
+rows, per-axis ROC-AUC has a roughly ±0.10 95% CI (Hanley-McNeil rule of thumb); a paired
+difference between two classifiers needs a challenger to fix about 7-8 more rows than it breaks
+(~12 points) before it's distinguishable from noise, so `MATERIAL_GAIN_THRESHOLD = 0.10` (D-29's
+existing Sol threshold) is about the smallest real gap this set can detect, and it stays unchanged.
+The rows aren't independent (near-duplicate clusters: the Fed rate hike x6, Google Suncatcher x4,
+Halo/Starfish/Starship x2 each), there is one human annotator, and a third of the labels changed
+during review — so a 1-3 row gap between two classifiers is noise, not signal, on any axis.
+Changes:
+- **Headline metric: the keep gate** (`relevance * newsworthy >= rank._MIN_SCORE`, i.e. exactly
+  what `rank.select_stories` filters candidates on), scored against `label_relevant AND
+  label_newsworthy` (39/21, the best-balanced label available) rather than against relevance alone
+  (51/9, too thin on negatives to trust per the finding above).
+- **Newsworthy stays secondary**; relevance metrics are now explicitly indicative only.
+- **Added:** relevance specificity (true-negative rate, since 8 of 9 negatives are junk pages);
+  selection precision against the labels (the share of each classifier's 8 selected stories that
+  are actually keepable), for each classifier and for an oracle built straight from the labels —
+  agreement-with-Luna alone can't say whether a disagreeing challenger is *better*; a paired
+  discordant-row count on the keep gate between any two classifiers; a paired bootstrap 95% CI
+  (1,000 resamples, seed 0) on a keep-gate AUC gap, reported for context, not gating any decision.
+- **Added: a Luna self-consistency run** (`luna_rerun` — the same `LLMClassifier` instance scored
+  a second time, own cache file, effectively free) purely to measure Luna's own run-to-run
+  keep-gate disagreement, used as the noise floor for the Jev rule below.
+
+**3. Sol rule: unchanged** (D-29 point 4) — Luna stays default unless selection agreement with Sol
+is low (Jaccard < 0.7) and Sol's largest gain across `{relevance_accuracy, relevance_roc_auc,
+newsworthy_roc_auc, keep_gate_roc_auc, selection_precision}` is material (>= 0.10). Sol costs ~20x
+Luna, so the burden of proof is on Sol.
+
+**4. Jev rule: replaced with an explicit non-inferiority rule** (supersedes D-32/D-33's
+`jev_beats_luna`, which mirrored Sol's "prove your gain" shape onto a *cheaper* model — the wrong
+shape, since absence of a proven gain isn't a reason to reject a cheaper model; only evidence of a
+real loss is). Jev becomes the default only if **all four** hold:
+1. Δ keep-gate ROC-AUC (Jev − Luna) ≥ **−0.05**. Half of Sol's own 0.10 material-gain bar: a swap
+   toward a cheaper default should cost at most a small, pre-declared amount of quality, not "no
+   proof it's worse."
+2. keep-gate discordants — #(Jev wrong, Luna right) − #(Luna wrong, Jev right) — ≤ Luna's own
+   `luna` vs `luna_rerun` keep-gate disagreement count. Jev is allowed to be worse than Luna only
+   by as much as Luna already disagrees with itself run to run — a data-driven tolerance instead
+   of a guessed number.
+3. Jev's selection precision ≥ Luna's − **0.125** (one story out of the 8 selected per episode).
+4. Jev's cost/100 (AI Gateway's `marketCost`, D-33) is lower than Luna's, and Jev's p50 latency is
+   no worse than Luna's.
+
+The bootstrap CI on the keep-gate AUC gap is printed next to the verdict but does **not** gate it:
+at n=60 it typically spans about ±0.10, wider than the 0.05 margin, so gating on the CI containing
+only non-negative values would make Jev structurally unselectable regardless of the true numbers.
+If both Sol and Jev qualify, the cheaper one wins.
+
+**5. If Jev is selected, production needs a per-article fallback to Luna before the default
+switches** (not built in the notebook; a follow-up once/if Jev wins): a `FallbackClassifier(jev,
+luna)` behind the same `Classifier` protocol, so no pipeline code changes — on any exception from
+Jev (timeout, HTTP error, malformed response) it scores that one article with Luna instead and
+returns Luna's result; `get_classifier("jev")` would return `FallbackClassifier(JevClassifier(...),
+LLMClassifier(luna))`; a fallback count gets recorded on the ranking stage's `pipeline_steps` row
+(a new nullable column if `PipelineStep` doesn't already have a place for it); tested with fakes
+(Jev raises -> Luna's result used and counted; Jev succeeds -> Luna never called).
+
+Alternatives: keeping D-32/D-33's `jev_beats_luna` (a mirrored "prove your gain" rule) — rejected
+per the user's explicit instruction; it penalizes a cheaper model for merely failing to prove
+superiority rather than for demonstrating a loss, the opposite of what a cost-driven default swap
+should require. Gating the decision on the bootstrap CI instead of point estimates plus fixed
+margins — rejected (same session, user's instruction): report it, don't gate on it, since n=60
+makes the CI itself too wide to be a useful gate at this margin.
+Consequences: results, the actual Jev pass/fail table, and the final default-classifier choice are
+appended below once the real "Restart & Run All" (or its nbconvert equivalent) completes.
