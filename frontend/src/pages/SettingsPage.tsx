@@ -206,7 +206,8 @@ export function SettingsPage() {
           type="button"
           onClick={() => save.mutate(draftToBody(draft))}
           disabled={save.isPending || !dirty}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60"
+          title={!save.isPending && !dirty ? "You haven't changed anything to save yet." : undefined}
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:select-none disabled:opacity-60"
         >
           {save.isPending ? 'Saving…' : 'Save settings'}
         </button>

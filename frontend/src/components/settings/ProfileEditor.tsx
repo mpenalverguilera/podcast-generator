@@ -108,7 +108,8 @@ export function ProfileEditor({
         type="button"
         onClick={addTopic}
         disabled={profile.topics.length >= 8}
-        className="mt-3 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:border-accent hover:text-accent disabled:opacity-50"
+        title={profile.topics.length >= 8 ? "You've reached the 8-topic limit — remove one to add another." : undefined}
+        className="mt-3 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:select-none disabled:opacity-50"
       >
         + Add topic
       </button>

@@ -48,8 +48,8 @@ export function GuidedInterview({ onExtracted }: { onExtracted: (profile: Intere
       <button
         onClick={() => extract.mutate()}
         disabled={extract.isPending || !hasAnswer}
-        title={hasAnswer ? undefined : 'Type an answer to at least one question first'}
-        className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:opacity-60"
+        title={hasAnswer ? undefined : 'Answer at least one question above before building a profile.'}
+        className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:select-none disabled:opacity-60"
       >
         {extract.isPending ? 'Building…' : 'Build my profile'}
       </button>

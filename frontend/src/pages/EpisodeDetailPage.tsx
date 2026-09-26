@@ -126,7 +126,7 @@ export function EpisodeDetailPage() {
           <button
             onClick={() => retry.mutate()}
             disabled={retry.isPending}
-            className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:opacity-60"
+            className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:select-none disabled:opacity-60"
           >
             {retry.isPending ? 'Retrying…' : 'Retry'}
           </button>

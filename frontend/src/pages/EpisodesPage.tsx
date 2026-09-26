@@ -133,7 +133,8 @@ function NewEpisodePanel({ disabled }: { disabled: boolean }) {
           generate.mutate()
         }}
         disabled={disabled || generate.isPending}
-        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60"
+        title={disabled && !generate.isPending ? 'An episode is already generating — wait for it to finish first.' : undefined}
+        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:select-none disabled:opacity-60"
       >
         {generate.isPending ? 'Starting…' : 'Generate now'}
       </button>
