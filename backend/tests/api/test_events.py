@@ -99,3 +99,40 @@ def test_post_event_on_someone_elses_episode_is_403(db) -> None:
     )
     assert resp.status_code == 403
     assert db.scalar(select(Event).where(Event.episode_id == episode.id)) is None
+
+
+def test_playback_state_is_read_back_from_play_events(db) -> None:
+    """played / completed / resume_position_s on GET /episodes and the resume
+    point on GET /episodes/{id} come from the caller's own play events (D-46)."""
+    user = make_user(db, email="resume@example.com")
+    unplayed = _ready_episode(db, user)
+    partial = _ready_episode(db, user)
+    finished = _ready_episode(db, user)
+    token = login("resume@example.com")
+
+    def send(type_: str, episode: Episode, payload: dict | None = None) -> None:
+        body = {"type": type_, "episode_id": episode.id, "payload": payload or {}}
+        assert client.post("/events", json=body, headers=auth_headers(token)).status_code == 201
+
+    send("play_started", partial)
+    send("play_progress", partial, {"position_s": 15})
+    send("play_progress", partial, {"position_s": 42.5})
+    send("play_started", finished)
+    send("play_progress", finished, {"position_s": 300})
+    send("play_completed", finished)
+
+    listing = {e["id"]: e for e in client.get("/episodes", headers=auth_headers(token)).json()}
+    assert (listing[unplayed.id]["played"], listing[unplayed.id]["completed"]) == (False, False)
+    assert listing[unplayed.id]["resume_position_s"] is None
+    assert (listing[partial.id]["played"], listing[partial.id]["completed"]) == (True, False)
+    assert listing[partial.id]["resume_position_s"] == 42.5
+    assert (listing[finished.id]["played"], listing[finished.id]["completed"]) == (True, True)
+    assert listing[finished.id]["resume_position_s"] is None
+
+    detail = client.get(f"/episodes/{partial.id}", headers=auth_headers(token)).json()
+    assert detail["resume_position_s"] == 42.5
+
+    # A re-listen after finishing sets a resume point again.
+    send("play_progress", finished, {"position_s": 20})
+    detail = client.get(f"/episodes/{finished.id}", headers=auth_headers(token)).json()
+    assert detail["resume_position_s"] == 20

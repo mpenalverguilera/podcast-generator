@@ -83,6 +83,9 @@ export function SettingsPage() {
     mutationFn: (body: PreferencesUpdate) => api.updatePreferences(body),
     onSuccess: (updated) => {
       queryClient.setQueryData(['preferences'], updated)
+      // has_profile lives on /me; refresh it so the Episodes link unlocks
+      // right after the first save instead of on the next page load.
+      void queryClient.invalidateQueries({ queryKey: ['me'] })
       if (draft) setSavedSnapshot(JSON.stringify(draft))
       setSavedMessage(true)
       setTimeout(() => setSavedMessage(false), 2000)

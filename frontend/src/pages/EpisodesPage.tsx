@@ -1,11 +1,12 @@
-import { useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { isTerminal, type EpisodeListItem } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
-import { StageStepper, StatusBadge } from '../components/StatusBadge'
+import { EpisodeListBadge, StageStepper } from '../components/StatusBadge'
+import { formatDuration } from '../lib/format'
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -16,11 +17,84 @@ function formatDate(iso: string): string {
   })
 }
 
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return '—'
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
+// "5h 12m", "3m", "2d 4h": coarse on purpose, it re-renders every 30s.
+function formatCountdown(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000))
+  const d = Math.floor(minutes / 1440)
+  const h = Math.floor((minutes % 1440) / 60)
+  const m = minutes % 60
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+function NextEpisodeCountdown() {
+  const queryClient = useQueryClient()
+  const prefsQuery = useQuery({ queryKey: ['preferences'], queryFn: api.getPreferences })
+  const [now, setNow] = useState(() => Date.now())
+  const nextRunAt = prefsQuery.data?.next_run_at ?? null
+  const target = nextRunAt ? new Date(nextRunAt).getTime() : null
+  const due = target !== null && target <= now
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // Once the scheduled time passes, pick up the new episode and the next slot.
+  useEffect(() => {
+    if (!due) return
+    void queryClient.invalidateQueries({ queryKey: ['preferences'] })
+    void queryClient.invalidateQueries({ queryKey: ['episodes'] })
+  }, [due, queryClient])
+
+  if (!prefsQuery.data) return null
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
+      {target === null ? (
+        <>
+          <span className="text-slate-500">No schedule set — episodes are only made when you ask.</span>
+          <Link to="/settings" className="font-medium text-accent hover:underline">
+            Set a schedule
+          </Link>
+        </>
+      ) : (
+        <>
+          <span className="text-slate-700">
+            Next episode{' '}
+            <span className="font-semibold text-slate-900">
+              {due ? 'is on its way' : `in ${formatCountdown(target - now)}`}
+            </span>
+          </span>
+          <span className="text-xs text-slate-500">
+            {new Date(target).toLocaleString(undefined, {
+              weekday: 'short',
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SetUpProfileCard() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+      <h2 className="text-base font-semibold text-slate-900">Set up your interests first</h2>
+      <p className="mt-1 text-sm text-slate-500">
+        Episodes are built from your preferences — tell us what you want to hear about.
+      </p>
+      <Link
+        to="/settings"
+        className="mt-4 inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark"
+      >
+        Add my interests
+      </Link>
+    </div>
+  )
 }
 
 function NewEpisodePanel({ disabled }: { disabled: boolean }) {
@@ -83,7 +157,7 @@ function EpisodeRow({ episode }: { episode: EpisodeListItem }) {
             {episode.focus_request && ' · focus request'}
           </p>
         </div>
-        <StatusBadge status={episode.status} />
+        <EpisodeListBadge episode={episode} />
       </div>
       {running && (
         <div className="mt-3">
@@ -102,16 +176,18 @@ function EpisodeRow({ episode }: { episode: EpisodeListItem }) {
 
 export function EpisodesPage() {
   const { user } = useAuth()
+  const needsProfile = user !== null && !user.has_profile
   const episodesQuery = useQuery({
     queryKey: ['episodes'],
     queryFn: api.listEpisodes,
+    enabled: !needsProfile,
     refetchInterval: (query) => {
       const data = query.state.data
       return data?.some((e) => !isTerminal(e.status)) ? 3000 : false
     },
   })
 
-  if (user && !user.has_profile) return <Navigate to="/settings" replace />
+  if (needsProfile) return <SetUpProfileCard />
   if (episodesQuery.isLoading) return <Spinner />
   if (episodesQuery.isError) return <p className="text-sm text-red-600">Could not load episodes.</p>
 
@@ -121,6 +197,7 @@ export function EpisodesPage() {
   return (
     <div>
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Episodes</h1>
+      <NextEpisodeCountdown />
       <NewEpisodePanel disabled={hasRunning} />
       {episodes.length === 0 ? (
         <p className="text-sm text-slate-500">No episodes yet — generate your first one above.</p>

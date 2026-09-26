@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { absoluteUrl, api, ApiError } from '../api/client'
-import { isTerminal, type TranscriptSection } from '../api/types'
+import { isTerminal, type EpisodeDetail, type TranscriptSection } from '../api/types'
 import { Spinner } from '../components/Spinner'
 import { StageStepper, StatusBadge } from '../components/StatusBadge'
 import { AudioPlayer } from '../components/AudioPlayer'
@@ -43,7 +43,12 @@ function RatingButtons({ episodeId, myRating }: { episodeId: number; myRating: 1
   const rate = useMutation({
     mutationFn: (value: 1 | -1 | 0) =>
       api.sendEvent({ type: 'episode_rated', episode_id: episodeId, payload: { value } }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['episode', episodeId] }),
+    // Patch just my_rating: a refetch would bring a new audio token and,
+    // before the player pinned its src, restarted playback (D-46).
+    onSuccess: (_data, value) =>
+      queryClient.setQueryData<EpisodeDetail>(['episode', episodeId], (old) =>
+        old ? { ...old, my_rating: value === 0 ? null : value } : old,
+      ),
   })
 
   function toggle(value: 1 | -1) {
@@ -135,7 +140,12 @@ export function EpisodeDetailPage() {
 
       {episode.audio_url && (
         <div className="mb-6 space-y-3">
-          <AudioPlayer episodeId={episode.id} src={absoluteUrl(episode.audio_url)} />
+          <AudioPlayer
+            key={episode.id}
+            episodeId={episode.id}
+            src={absoluteUrl(episode.audio_url)}
+            resumeFrom={episode.resume_position_s}
+          />
           <RatingButtons episodeId={episode.id} myRating={episode.my_rating} />
         </div>
       )}

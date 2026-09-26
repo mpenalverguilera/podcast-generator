@@ -121,6 +121,9 @@ export interface EpisodeListItem {
   target_minutes: number
   duration_s: number | null
   created_at: string
+  played: boolean
+  completed: boolean
+  resume_position_s: number | null
 }
 
 export interface TranscriptTurn {
@@ -170,6 +173,7 @@ export interface EpisodeDetail {
   ready_at: string | null
   audio_url: string | null
   my_rating: 1 | -1 | null
+  resume_position_s: number | null
   sections: TranscriptSection[]
   steps: StepSummary[]
 }

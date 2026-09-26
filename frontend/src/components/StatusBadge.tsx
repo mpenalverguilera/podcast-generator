@@ -1,4 +1,5 @@
-import { STAGE_ORDER } from '../api/types'
+import { STAGE_ORDER, type EpisodeListItem } from '../api/types'
+import { formatDuration } from '../lib/format'
 
 const LABELS: Record<string, string> = {
   pending: 'Pending',
@@ -17,6 +18,8 @@ export function statusLabel(status: string): string {
   return LABELS[status] ?? status
 }
 
+const BADGE = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium'
+
 export function StatusBadge({ status }: { status: string }) {
   const color =
     status === 'ready'
@@ -25,10 +28,25 @@ export function StatusBadge({ status }: { status: string }) {
         ? 'bg-red-100 text-red-700'
         : 'bg-amber-100 text-amber-700'
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
+    <span className={`${BADGE} ${color}`}>
       {statusLabel(status)}
     </span>
   )
+}
+
+// The episodes list badge: a ready episode shows whether the user has
+// listened to it (New / In progress / Played); anything else shows its status.
+export function EpisodeListBadge({ episode }: { episode: EpisodeListItem }) {
+  if (episode.status !== 'ready') return <StatusBadge status={episode.status} />
+  if (episode.completed) return <span className={`${BADGE} bg-sky-100 text-sky-700`}>Played</span>
+  if (episode.played) {
+    return (
+      <span className={`${BADGE} bg-sky-50 text-sky-700 ring-1 ring-sky-200`}>
+        In progress{episode.resume_position_s != null && ` · ${formatDuration(episode.resume_position_s)}`}
+      </span>
+    )
+  }
+  return <span className={`${BADGE} bg-emerald-100 text-emerald-700`}>New</span>
 }
 
 // A small stepper across the pipeline's stage order, current stage highlighted.

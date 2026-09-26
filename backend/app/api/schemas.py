@@ -124,6 +124,12 @@ class EpisodeListItem(BaseModel):
     target_minutes: int
     duration_s: float | None
     created_at: datetime
+    # Derived from the caller's own play events (D-46): played = ever started,
+    # completed = finished after the last progress tick, resume_position_s =
+    # the last reported position of an unfinished listen.
+    played: bool
+    completed: bool
+    resume_position_s: float | None
 
 
 class TranscriptTurn(BaseModel):
@@ -180,6 +186,8 @@ class EpisodeDetail(BaseModel):
     audio_url: str | None
     # The caller's latest episode_rated value; a 0 ("cleared") reads as None.
     my_rating: Literal[1, -1] | None
+    # Where the player should pick up an unfinished listen; None = start over.
+    resume_position_s: float | None
     sections: list[TranscriptSection]
     steps: list[StepSummary]
 

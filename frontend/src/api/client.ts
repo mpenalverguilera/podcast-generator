@@ -107,6 +107,7 @@ export const api = {
   retryEpisode: (id: number) =>
     request<EpisodeCreated>(`/episodes/${id}/retry`, { method: 'POST' }),
 
+  // keepalive lets the last play_progress survive the tab being closed.
   sendEvent: (body: EventCreate) =>
-    request<{ id: number }>('/events', { method: 'POST', body: JSON.stringify(body) }),
+    request<{ id: number }>('/events', { method: 'POST', body: JSON.stringify(body), keepalive: true }),
 }

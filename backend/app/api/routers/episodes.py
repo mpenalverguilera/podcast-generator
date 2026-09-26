@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -85,21 +86,28 @@ def list_episodes(
     rows = db.scalars(
         select(Episode).where(Episode.user_id == user.id).order_by(Episode.created_at.desc())
     ).all()
-    return [
-        EpisodeListItem(
-            id=e.id,
-            status=e.status.value,
-            failed_stage=e.failed_stage,
-            error=e.error,
-            trigger=e.trigger.value,
-            focus_request=e.focus_request,
-            title=e.title,
-            target_minutes=e.target_minutes,
-            duration_s=e.duration_s,
-            created_at=e.created_at,
+    playback = _playback_state(db, user, [e.id for e in rows])
+    items = []
+    for e in rows:
+        play = playback.get(e.id, _NOT_PLAYED)
+        items.append(
+            EpisodeListItem(
+                id=e.id,
+                status=e.status.value,
+                failed_stage=e.failed_stage,
+                error=e.error,
+                trigger=e.trigger.value,
+                focus_request=e.focus_request,
+                title=e.title,
+                target_minutes=e.target_minutes,
+                duration_s=e.duration_s,
+                created_at=e.created_at,
+                played=play.played,
+                completed=play.completed,
+                resume_position_s=play.resume_position_s,
+            )
         )
-        for e in rows
-    ]
+    return items
 
 
 def _article_id(source_id: str) -> int | None:
@@ -183,6 +191,46 @@ def _my_rating(episode: Episode, user: User, db: Session) -> int | None:
     return value if value in (1, -1) else None
 
 
+@dataclass(frozen=True)
+class _Playback:
+    played: bool = False
+    completed: bool = False
+    resume_position_s: float | None = None
+
+
+_NOT_PLAYED = _Playback()
+_PLAY_EVENTS = ("play_started", "play_progress", "play_completed")
+
+
+def _playback_state(db: Session, user: User, episode_ids: list[int]) -> dict[int, _Playback]:
+    """Per-episode listening state, read back from the player's own events
+    (no extra column; D-46). Events are walked in id order, so a completion
+    clears the resume point and a later progress tick (a re-listen) sets it
+    again. One query for all episodes; a user's play events are few."""
+    if not episode_ids:
+        return {}
+    events = db.scalars(
+        select(Event)
+        .where(
+            Event.user_id == user.id,
+            Event.episode_id.in_(episode_ids),
+            Event.type.in_(_PLAY_EVENTS),
+        )
+        .order_by(Event.id)
+    )
+    state: dict[int, _Playback] = {}
+    for event in events:
+        prev = state.get(event.episode_id, _NOT_PLAYED)
+        if event.type == "play_completed":
+            state[event.episode_id] = _Playback(True, True, None)
+        elif event.type == "play_progress":
+            position = (event.payload or {}).get("position_s")
+            state[event.episode_id] = _Playback(True, False, position)
+        else:
+            state[event.episode_id] = _Playback(True, prev.completed, prev.resume_position_s)
+    return state
+
+
 def _build_steps(episode: Episode, db: Session) -> list[StepSummary]:
     steps = db.scalars(
         select(PipelineStep).where(PipelineStep.episode_id == episode.id).order_by(PipelineStep.id)
@@ -231,6 +279,9 @@ def get_episode(
             else None
         ),
         my_rating=_my_rating(episode, user, db),
+        resume_position_s=_playback_state(db, user, [episode.id])
+        .get(episode.id, _NOT_PLAYED)
+        .resume_position_s,
         sections=_build_sections(episode, db),
         steps=_build_steps(episode, db),
     )

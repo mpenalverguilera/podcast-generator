@@ -17,9 +17,19 @@ export function Layout({ children }: { children: ReactNode }) {
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2 px-4 py-3">
           <span className="mr-2 text-sm font-semibold text-slate-900">🎙️ Podcast</span>
           <nav className="flex flex-1 gap-1">
-            <NavLink to="/" className={navClass} end>
-              Episodes
-            </NavLink>
+            {user?.has_profile ? (
+              <NavLink to="/" className={navClass} end>
+                Episodes
+              </NavLink>
+            ) : (
+              <span
+                title="Add your interests first"
+                aria-disabled="true"
+                className="cursor-not-allowed rounded-md px-3 py-2 text-sm font-medium text-slate-300"
+              >
+                Episodes
+              </span>
+            )}
             <NavLink to="/settings" className={navClass}>
               Interests &amp; settings
             </NavLink>
