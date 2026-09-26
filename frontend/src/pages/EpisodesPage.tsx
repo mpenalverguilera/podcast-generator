@@ -55,7 +55,7 @@ function NextEpisodeCountdown() {
       {target === null ? (
         <>
           <span className="text-slate-500">No schedule set — episodes are only made when you ask.</span>
-          <Link to="/settings" className="font-medium text-accent hover:underline">
+          <Link to="/settings#schedule" className="font-medium text-accent hover:underline">
             Set a schedule
           </Link>
         </>

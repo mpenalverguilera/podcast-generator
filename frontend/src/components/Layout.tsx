@@ -13,7 +13,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2 px-4 py-3">
           <span className="mr-2 text-sm font-semibold text-slate-900">🎙️ Podcast</span>
           <nav className="flex flex-1 gap-1">

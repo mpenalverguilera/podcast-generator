@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { HostIn, InterestProfile, PreferencesUpdate, Tone, VoiceOut } from '../api/types'
@@ -44,6 +44,7 @@ export function SettingsPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
   const [savedMessage, setSavedMessage] = useState(false)
+  const scheduleSectionRef = useRef<HTMLDivElement>(null)
 
   // Seed the draft from the server once, on first load only -- a later
   // background refetch (e.g. on window focus) must never clobber edits the
@@ -68,6 +69,14 @@ export function SettingsPage() {
   }, [draft, preferencesQuery.data, voicesQuery.data])
 
   const dirty = draft !== null && JSON.stringify(draft) !== savedSnapshot
+
+  // Jump to the schedule section when arriving via a #schedule link (e.g. from
+  // the "Set a schedule" prompt on the episodes page). Runs after the draft
+  // (and the rest of the form) has rendered, so the target actually exists.
+  useEffect(() => {
+    if (!draft || window.location.hash !== '#schedule') return
+    scheduleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [draft])
 
   useEffect(() => {
     if (!dirty) return
@@ -152,7 +161,7 @@ export function SettingsPage() {
           <HostFields label="Host B" host={draft.host_b} voices={voices} onChange={(h) => update({ host_b: h })} />
         </div>
 
-        <div>
+        <div id="schedule" ref={scheduleSectionRef} className="scroll-mt-20">
           <label className="mb-1 block text-xs font-medium text-slate-600">Schedule</label>
           <div className="mb-2 flex gap-2">
             {SCHEDULE_MODES.map((mode) => (
