@@ -17,6 +17,8 @@ export function GuidedInterview({ onExtracted }: { onExtracted: (profile: Intere
     onSuccess: onExtracted,
   })
 
+  const hasAnswer = Object.values(answers).some((v) => v.trim())
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="mb-1 text-sm font-semibold text-slate-900">Tell us what you follow</h2>
@@ -45,7 +47,8 @@ export function GuidedInterview({ onExtracted }: { onExtracted: (profile: Intere
       )}
       <button
         onClick={() => extract.mutate()}
-        disabled={extract.isPending}
+        disabled={extract.isPending || !hasAnswer}
+        title={hasAnswer ? undefined : 'Type an answer to at least one question first'}
         className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-dark disabled:opacity-60"
       >
         {extract.isPending ? 'Building…' : 'Build my profile'}

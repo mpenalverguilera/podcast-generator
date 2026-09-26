@@ -69,6 +69,12 @@ class MeResponse(BaseModel):
 class ProfileExtractRequest(BaseModel):
     answers: dict[str, str]
 
+    @model_validator(mode="after")
+    def _check_answers(self) -> "ProfileExtractRequest":
+        if not any(v.strip() for v in self.answers.values()):
+            raise ValueError("answer at least one question before building a profile")
+        return self
+
 
 class QuestionOut(BaseModel):
     key: str

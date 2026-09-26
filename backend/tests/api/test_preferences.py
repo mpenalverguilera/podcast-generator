@@ -35,6 +35,21 @@ def test_profile_extract_does_not_save(db) -> None:
     assert db.get(type(user.preferences), user.id).interest_profile == {"topics": [], "avoid": []}
 
 
+def test_profile_extract_rejects_empty_answers(db) -> None:
+    make_user(db)
+    token = login()
+
+    resp = client.post("/profile/extract", json={"answers": {}}, headers=auth_headers(token))
+    assert resp.status_code == 422, resp.text
+
+    resp = client.post(
+        "/profile/extract",
+        json={"answers": {"work": "  ", "fun": ""}},
+        headers=auth_headers(token),
+    )
+    assert resp.status_code == 422, resp.text
+
+
 def test_get_and_put_preferences(db) -> None:
     make_user(db, email="prefs@example.com")
     token = login("prefs@example.com")
