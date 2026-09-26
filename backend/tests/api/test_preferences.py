@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.models import Event
 from app.voices import CURATED_VOICES
 from tests.api.conftest import auth_headers, client, login, make_user
@@ -38,7 +41,7 @@ def test_get_and_put_preferences(db) -> None:
 
     resp = client.get("/preferences", headers=auth_headers(token))
     assert resp.status_code == 200, resp.text
-    assert resp.json()["target_minutes"] == 6
+    assert resp.json()["target_minutes"] == 3
 
     resp = client.put(
         "/preferences",
@@ -132,3 +135,54 @@ def test_list_voices(db) -> None:
 def test_voices_requires_auth(db) -> None:
     resp = client.get("/voices")
     assert resp.status_code == 401
+
+
+def test_next_run_at_follows_the_schedule(db) -> None:
+    make_user(db, email="next-run@example.com")
+    token = login("next-run@example.com")
+    assert client.get("/preferences", headers=auth_headers(token)).json()["next_run_at"] is None
+
+    resp = client.put(
+        "/preferences",
+        json={"schedule_cron": "30 7 * * 1-5", "timezone": "Europe/Madrid"},
+        headers=auth_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    next_run = datetime.fromisoformat(resp.json()["next_run_at"])
+    assert (next_run.hour, next_run.minute) == (7, 30)
+    assert next_run.weekday() < 5
+    assert next_run > datetime.now(next_run.tzinfo)
+
+    cleared = client.put("/preferences", json={"schedule_cron": None}, headers=auth_headers(token))
+    assert cleared.json()["next_run_at"] is None
+
+
+def test_length_options(db) -> None:
+    make_user(db)
+    token = login()
+    resp = client.get("/preferences/length-options", headers=auth_headers(token))
+    assert resp.status_code == 200, resp.text
+    options = resp.json()
+    assert [o["minutes"] for o in options] == list(range(3, 13))
+    stories = [o["stories"] for o in options]
+    assert all(n >= 1 for n in stories) and stories == sorted(stories)
+
+
+def test_voice_preview_needs_the_media_token(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    voice = CURATED_VOICES[0]
+    (tmp_path / "voice_previews").mkdir()
+    (tmp_path / "voice_previews" / f"{voice.id}.mp3").write_bytes(b"ID3fake")
+    make_user(db)
+    token = login()
+
+    voices = client.get("/voices", headers=auth_headers(token)).json()
+    preview_url = next(v["preview_url"] for v in voices if v["id"] == voice.id)
+    assert preview_url.startswith(f"/voices/{voice.id}/preview?t=")
+
+    # Plain <audio src>: no Authorization header, the token is the credential.
+    assert client.get(preview_url).status_code == 200
+    assert client.get(f"/voices/{voice.id}/preview?t={token}").status_code == 401
+    other = CURATED_VOICES[1].id
+    wrong_voice = preview_url.replace(f"/voices/{voice.id}/", f"/voices/{other}/")
+    assert client.get(wrong_voice).status_code == 401

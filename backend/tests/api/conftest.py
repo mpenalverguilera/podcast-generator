@@ -26,7 +26,7 @@ def make_user(db, *, email: str = "user@example.com", is_admin: bool = False) ->
         Preferences(
             user_id=user.id,
             interest_profile={"topics": [], "avoid": []},
-            target_minutes=6,
+            target_minutes=3,  # shortest length keeps full fake runs fast
             host_a={"name": "Alex", "voice_id": "voice-a"},
             host_b={"name": "Sam", "voice_id": "voice-b"},
             timezone="UTC",

@@ -55,6 +55,28 @@ def _daily_spend_usd(db: Session, today: date) -> float:
     return float(total or 0.0)
 
 
+FORCED_FAILURE = "forced failure (FAKE_FAIL_ONCE_AT)"
+
+
+def _should_force_failure(db: Session, episode_id: int, stage_name: str, tts: str) -> bool:
+    """Dev-only switch for walking through the Retry flow on fakes: fail at
+    FAKE_FAIL_ONCE_AT the first time an episode reaches that stage. Never
+    active with real TTS, so it can't throw away a paid run. D-40."""
+    settings = get_settings()
+    if settings.fake_fail_once_at != stage_name or tts != "fake":
+        return False
+    already_failed_here = db.scalar(
+        select(func.count())
+        .select_from(PipelineStep)
+        .where(
+            PipelineStep.episode_id == episode_id,
+            PipelineStep.stage == stage_name,
+            PipelineStep.status == StepStatus.FAILED,
+        )
+    )
+    return not already_failed_here
+
+
 def run_episode(
     episode_id: int, stop_after: str | None = None, tts_override: str | None = None
 ) -> Episode:
@@ -95,6 +117,9 @@ def run_episode(
             stage_start = time.monotonic()
             started_at = datetime.now(UTC)
             try:
+                tts = tts_override or settings.tts_provider
+                if _should_force_failure(db, episode.id, stage_name, tts):
+                    raise RuntimeError(FORCED_FAILURE)
                 usage = stage_module.run(episode, adapters, db)
             except Exception as exc:
                 latency_ms = int((time.monotonic() - stage_start) * 1000)

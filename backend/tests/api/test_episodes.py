@@ -1,6 +1,7 @@
 import time
 from datetime import UTC, datetime
 
+from app.config import get_settings
 from app.models import Episode, EpisodeStatus, EpisodeTrigger
 from tests.api.conftest import auth_headers, client, login, make_user
 
@@ -32,7 +33,9 @@ def test_generate_list_detail_and_audio_range(db) -> None:
     token = login("gen@example.com")
 
     resp = client.post(
-        "/episodes/generate", json={"target_minutes": 4}, headers=auth_headers(token)
+        "/episodes/generate",
+        json={"target_minutes": 4, "focus_request": "prior authorization"},
+        headers=auth_headers(token),
     )
     assert resp.status_code == 201, resp.text
     created = resp.json()
@@ -42,19 +45,86 @@ def test_generate_list_detail_and_audio_range(db) -> None:
     detail = _poll_until_terminal(token, episode_id)
     assert detail["status"] == "ready", detail
     assert detail["target_minutes"] == 4
-    assert detail["transcript"], "expected a non-empty transcript"
+    assert detail["trigger"] == "manual"
+    assert detail["focus_request"] == "prior authorization"
+    assert detail["my_rating"] is None
     assert detail["steps"], "expected pipeline_steps summaries"
+
+    sections = detail["sections"]
+    assert [sections[0]["kind"], sections[-1]["kind"]] == ["intro", "outro"]
+    assert sections[0]["heading"] is None and sections[0]["sources"] == []
+    stories = [s for s in sections if s["kind"] == "story"]
+    assert stories, "expected at least one story section"
+    for story in stories:
+        assert story["turns"] and story["sources"]
+        assert story["heading"] == story["sources"][0]["title"]
+        assert story["topic"]
+    assert all(t["speaker"] in ("Alex", "Sam") for s in sections for t in s["turns"])
 
     listing = client.get("/episodes", headers=auth_headers(token))
     assert listing.status_code == 200, listing.text
-    assert any(e["id"] == episode_id for e in listing.json())
+    item = next(e for e in listing.json() if e["id"] == episode_id)
+    assert item["trigger"] == "manual"
+    assert item["focus_request"] == "prior authorization"
+    assert item["failed_stage"] is None
 
-    audio_resp = client.get(
-        f"/episodes/{episode_id}/audio",
-        headers={**auth_headers(token), "Range": "bytes=0-99"},
-    )
+    # A native <audio src> sends no Authorization header: the media token in
+    # audio_url is the only credential.
+    assert detail["audio_url"].startswith(f"/episodes/{episode_id}/audio?t=")
+    audio_resp = client.get(detail["audio_url"], headers={"Range": "bytes=0-99"})
     assert audio_resp.status_code == 206, audio_resp.text
     assert audio_resp.headers["content-range"].startswith("bytes 0-99/")
+
+
+def test_audio_needs_a_media_token_for_that_episode(db) -> None:
+    make_user(db, email="audio@example.com")
+    token = login("audio@example.com")
+    first = client.post("/episodes/generate", json={}, headers=auth_headers(token)).json()
+    first_detail = _poll_until_terminal(token, first["id"])
+    second = client.post("/episodes/generate", json={}, headers=auth_headers(token)).json()
+    second_detail = _poll_until_terminal(token, second["id"])
+
+    audio = f"/episodes/{first['id']}/audio"
+    assert client.get(audio, headers=auth_headers(token)).status_code == 422, "t is required"
+    assert client.get(f"{audio}?t={token}").status_code == 401, "a login token isn't one"
+    other_token = second_detail["audio_url"].split("?t=")[1]
+    assert client.get(f"{audio}?t={other_token}").status_code == 401, "wrong episode"
+    assert client.get(first_detail["audio_url"]).status_code == 200
+
+
+def test_media_token_is_not_a_login_token(db) -> None:
+    make_user(db, email="media-login@example.com")
+    token = login("media-login@example.com")
+    created = client.post("/episodes/generate", json={}, headers=auth_headers(token)).json()
+    detail = _poll_until_terminal(token, created["id"])
+    media_token = detail["audio_url"].split("?t=")[1]
+    assert client.get("/me", headers=auth_headers(media_token)).status_code == 401
+
+
+def test_my_rating_follows_the_latest_rating(db) -> None:
+    user = make_user(db, email="rater@example.com")
+    token = login("rater@example.com")
+    episode = Episode(
+        user_id=user.id,
+        status=EpisodeStatus.READY,
+        trigger=EpisodeTrigger.MANUAL,
+        window_start=datetime.now(UTC),
+        target_minutes=6,
+    )
+    db.add(episode)
+    db.commit()
+    created = {"id": episode.id}
+
+    def rate(value: int) -> int | None:
+        event = {"type": "episode_rated", "episode_id": created["id"], "payload": {"value": value}}
+        resp = client.post("/events", json=event, headers=auth_headers(token))
+        assert resp.status_code == 201, resp.text
+        detail = client.get(f"/episodes/{created['id']}", headers=auth_headers(token))
+        return detail.json()["my_rating"]
+
+    assert rate(1) == 1
+    assert rate(-1) == -1
+    assert rate(0) is None, "0 clears the rating"
 
 
 def test_generate_without_override_uses_saved_default(db) -> None:
@@ -63,7 +133,7 @@ def test_generate_without_override_uses_saved_default(db) -> None:
 
     resp = client.post("/episodes/generate", json={}, headers=auth_headers(token))
     assert resp.status_code == 201, resp.text
-    assert resp.json()["target_minutes"] == 6  # make_user's fixture default
+    assert resp.json()["target_minutes"] == 3  # make_user's fixture default
 
     _poll_until_terminal(token, resp.json()["id"])
 
@@ -130,6 +200,25 @@ def test_retry_failed_episode(db) -> None:
     assert again.status_code == 409, again.text
 
     detail = _poll_until_terminal(token, episode.id, stale=("failed", "planning"))
+    assert detail["status"] == "ready", detail
+
+
+def test_forced_failure_then_retry_succeeds(db, monkeypatch) -> None:
+    """The phase 06 walkthrough's "retry a forced failure", on fakes."""
+    monkeypatch.setattr(get_settings(), "fake_fail_once_at", "ranking")
+    make_user(db, email="forced@example.com")
+    token = login("forced@example.com")
+
+    created = client.post("/episodes/generate", json={}, headers=auth_headers(token)).json()
+    failed = _poll_until_terminal(token, created["id"])
+    assert (failed["status"], failed["failed_stage"]) == ("failed", "ranking")
+    listing = client.get("/episodes", headers=auth_headers(token)).json()
+    item = next(e for e in listing if e["id"] == created["id"])
+    assert item["failed_stage"] == "ranking" and "forced failure" in item["error"]
+
+    resp = client.post(f"/episodes/{created['id']}/retry", headers=auth_headers(token))
+    assert resp.status_code == 200, resp.text
+    detail = _poll_until_terminal(token, created["id"], stale=("failed", "ranking"))
     assert detail["status"] == "ready", detail
 
 

@@ -79,7 +79,9 @@ def make_user_with_episode(db, *, status: EpisodeStatus = EpisodeStatus.PENDING)
         status=status,
         trigger=EpisodeTrigger.MANUAL,
         window_start=datetime.now(UTC),
-        target_minutes=6,
+        # The shortest length: fake runs go all the way through fake TTS and
+        # ffmpeg, which takes time proportional to the episode length.
+        target_minutes=3,
     )
     db.add(episode)
     db.commit()

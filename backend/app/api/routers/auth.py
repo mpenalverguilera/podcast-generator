@@ -27,4 +27,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
 
 @router.get("/me", response_model=MeResponse)
 def me(user: User = Depends(current_user)) -> MeResponse:
-    return MeResponse(id=user.id, email=user.email, is_admin=user.is_admin)
+    profile = (user.preferences.interest_profile or {}) if user.preferences else {}
+    return MeResponse(
+        id=user.id,
+        email=user.email,
+        is_admin=user.is_admin,
+        has_profile=bool(profile.get("topics")),
+    )

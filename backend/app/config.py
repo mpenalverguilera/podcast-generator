@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     max_tts_chars_per_episode: int = 12000
     daily_spend_cap_usd: float = 5.0
 
+    # Dev only: fail each episode once at this stage (e.g. "voicing") so the
+    # Retry flow can be walked through on fakes. Ignored unless TTS is fake,
+    # so it can never waste a paid run. docs/DECISIONS.md D-40.
+    fake_fail_once_at: str | None = None
+
     # Paths
     data_dir: Path = Path("./data")
 

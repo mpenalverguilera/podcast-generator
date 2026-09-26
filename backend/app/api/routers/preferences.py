@@ -1,26 +1,29 @@
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfoNotFoundError
 
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.adapters.llm import get_llm
 from app.api.schemas import (
     HostOut,
+    LengthOption,
     PreferencesOut,
     PreferencesUpdate,
     ProfileExtractRequest,
     QuestionOut,
     VoiceOut,
 )
-from app.auth import current_user
+from app.auth import create_media_token, current_user, verify_media_token
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import Event, User
 from app.pipeline.profile import GUIDED_QUESTIONS, extract_profile
+from app.pipeline.rank import story_count_for
 from app.scheduler import sync_user_schedule
 from app.schemas import InterestProfile
 from app.voices import CURATED_VOICES
@@ -48,6 +51,15 @@ def profile_extract(
     return profile
 
 
+def _next_run_at(schedule_cron: str | None, timezone: str) -> datetime | None:
+    """Computed from the saved cron rather than asked of the live scheduler,
+    so it reads the same whether or not the scheduler is running."""
+    if not schedule_cron:
+        return None
+    trigger = CronTrigger.from_crontab(schedule_cron, timezone=timezone)
+    return trigger.get_next_fire_time(None, datetime.now(UTC))
+
+
 def _preferences_out(user: User) -> PreferencesOut:
     prefs = user.preferences
     return PreferencesOut(
@@ -58,6 +70,7 @@ def _preferences_out(user: User) -> PreferencesOut:
         host_b=HostOut(**{"name": "Sam", "voice_id": "", **(prefs.host_b or {})}),
         schedule_cron=prefs.schedule_cron,
         timezone=prefs.timezone,
+        next_run_at=_next_run_at(prefs.schedule_cron, prefs.timezone),
     )
 
 
@@ -66,6 +79,14 @@ def get_preferences(user: User = Depends(current_user)) -> PreferencesOut:
     if user.preferences is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no preferences for this user")
     return _preferences_out(user)
+
+
+@router.get("/preferences/length-options", response_model=list[LengthOption])
+def length_options() -> list[LengthOption]:
+    """How many stories each episode length gets, for the settings slider's
+    "~6 min · ~5 stories" estimate -- served from the ranker's own rule so
+    the frontend doesn't keep a copy that can drift."""
+    return [LengthOption(minutes=m, stories=story_count_for(m)) for m in range(3, 13)]
 
 
 @router.put("/preferences", response_model=PreferencesOut)
@@ -114,8 +135,12 @@ def update_preferences(
 
 
 def _voice_preview_url(settings: Settings, voice_id: str) -> str | None:
+    # Tokenised like episode audio (D-40): <audio src> can't send the Bearer
+    # header, and previews stay private rather than an open download.
     preview_path = Path(settings.data_dir) / "voice_previews" / f"{voice_id}.mp3"
-    return f"/voices/{voice_id}/preview" if preview_path.exists() else None
+    if not preview_path.exists():
+        return None
+    return f"/voices/{voice_id}/preview?t={create_media_token('voice', voice_id)}"
 
 
 @router.get("/voices", response_model=list[VoiceOut])
@@ -133,9 +158,10 @@ def list_voices(
 @router.get("/voices/{voice_id}/preview")
 def voice_preview(
     voice_id: str,
-    _user: User = Depends(current_user),
+    t: str = Query(description="media token from GET /voices' preview_url"),
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
+    verify_media_token(t, "voice", voice_id)
     preview_path = Path(settings.data_dir) / "voice_previews" / f"{voice_id}.mp3"
     if not preview_path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no preview for this voice")

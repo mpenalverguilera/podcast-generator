@@ -2,10 +2,11 @@ import logging
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.models import EpisodeStatus, PipelineStep, StepStatus
 from app.pipeline import STAGE_ORDER
 from app.pipeline import voice as voice_stage
-from app.pipeline.runner import run_episode
+from app.pipeline.runner import _should_force_failure, run_episode
 from tests.conftest import make_user_with_episode
 
 
@@ -147,3 +148,25 @@ def test_stop_after_marks_the_pause(db) -> None:
     run_episode(episode.id)
     db.refresh(episode)
     assert (episode.status, episode.error) == (EpisodeStatus.READY, None)
+
+
+def test_fake_fail_once_at_fails_once_then_resumes(db, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "fake_fail_once_at", "ranking")
+    episode = make_user_with_episode(db)
+
+    first = run_episode(episode.id)
+    assert (first.status, first.failed_stage) == (EpisodeStatus.FAILED, "ranking")
+    assert "FAKE_FAIL_ONCE_AT" in first.error
+
+    second = run_episode(episode.id)
+    assert second.status == EpisodeStatus.READY
+
+
+def test_fake_fail_once_at_is_ignored_with_real_tts(db, monkeypatch) -> None:
+    """Never throws away a paid run: with real TTS the switch is off."""
+    monkeypatch.setattr(get_settings(), "fake_fail_once_at", "ranking")
+    episode = make_user_with_episode(db)
+
+    assert _should_force_failure(db, episode.id, "ranking", "fake") is True
+    assert _should_force_failure(db, episode.id, "ranking", "elevenlabs") is False
+    assert _should_force_failure(db, episode.id, "voicing", "fake") is False

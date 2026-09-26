@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.schemas import RenderedPrompt, Usage
 
 _SHORT_ID_RE = re.compile(r"\[(a\d+)\]")
+_WORD_TARGET_RE = re.compile(r"about (\d+) words")
 _FAKE_SENTENCE = "This is a fake sentence for testing scripts. "
 
 # Canned payloads keyed by schema class name, for schemas whose all-default
@@ -78,11 +79,15 @@ def _fake_script(prompt_text: str) -> dict:
     `[aNN]` article block and build a script around exactly those -- still
     fully deterministic for a given prompt.
 
-    Word count is calibrated (8-word sentence unit x the multipliers below) to
-    land inside the +-15% budget around the 6-minute/900-word default this
-    project's fake-adapter tests use: intro 64 + 168*len(ids) + outro 40.
+    Length follows the prompt's own "about N words" target: intro (64 words)
+    and outro (40) are fixed, and each story's three turns share the rest in
+    8-word sentences, so the script lands inside the +-15% budget for any
+    episode length and story count (docs/DECISIONS.md D-40).
     """
     ids = _SHORT_ID_RE.findall(prompt_text) or ["a0"]
+    target = _WORD_TARGET_RE.search(prompt_text)
+    per_story_words = (int(target.group(1)) - 104) / len(ids) if target else 168
+    per_turn = max(1, round(per_story_words / 3 / 8))
     sections = [
         {
             "kind": "intro",
@@ -101,9 +106,9 @@ def _fake_script(prompt_text: str) -> dict:
                 "story_id": f"s{i + 1}",
                 "source_ids": [sid],
                 "turns": [
-                    {"speaker": "host_a", "text": _FAKE_SENTENCE * 7},
-                    {"speaker": "host_b", "text": _FAKE_SENTENCE * 7},
-                    {"speaker": "host_a", "text": _FAKE_SENTENCE * 7},
+                    {"speaker": "host_a", "text": _FAKE_SENTENCE * per_turn},
+                    {"speaker": "host_b", "text": _FAKE_SENTENCE * per_turn},
+                    {"speaker": "host_a", "text": _FAKE_SENTENCE * per_turn},
                 ],
             }
         )

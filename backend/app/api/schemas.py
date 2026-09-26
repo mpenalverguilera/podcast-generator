@@ -30,6 +30,9 @@ class MeResponse(BaseModel):
     id: int
     email: str
     is_admin: bool
+    # False until the user saves at least one topic -- the frontend sends
+    # first-time users to the settings page on this.
+    has_profile: bool
 
 
 class ProfileExtractRequest(BaseModel):
@@ -54,6 +57,13 @@ class PreferencesOut(BaseModel):
     host_b: HostOut
     schedule_cron: str | None
     timezone: str
+    # Computed from schedule_cron/timezone, not read from the live scheduler.
+    next_run_at: datetime | None
+
+
+class LengthOption(BaseModel):
+    minutes: int
+    stories: int
 
 
 class HostIn(BaseModel):
@@ -106,6 +116,10 @@ class EpisodeCreated(BaseModel):
 class EpisodeListItem(BaseModel):
     id: int
     status: str
+    failed_stage: str | None
+    error: str | None
+    trigger: str
+    focus_request: str | None
     title: str | None
     target_minutes: int
     duration_s: float | None
@@ -123,9 +137,17 @@ class SourceArticle(BaseModel):
     url: str
 
 
-class StorySource(BaseModel):
-    story_id: str
-    articles: list[SourceArticle]
+class TranscriptSection(BaseModel):
+    """One script section as the episode page shows it: a story's heading
+    (its first source's title) and topic, its turns, and its sources right
+    under it. Intro and outro have no heading, topic or sources."""
+
+    kind: Literal["intro", "story", "outro"]
+    story_id: str | None
+    heading: str | None
+    topic: str | None
+    turns: list[TranscriptTurn]
+    sources: list[SourceArticle]
 
 
 class StepSummary(BaseModel):
@@ -145,14 +167,20 @@ class EpisodeDetail(BaseModel):
     status: str
     failed_stage: str | None
     error: str | None
+    trigger: str
+    focus_request: str | None
     title: str | None
     summary: str | None
     target_minutes: int
     duration_s: float | None
     created_at: datetime
     ready_at: datetime | None
-    transcript: list[TranscriptTurn]
-    sources: list[StorySource]
+    # Includes a short-lived media token (?t=...), since <audio src> can't
+    # send the Authorization header. None until the episode has audio.
+    audio_url: str | None
+    # The caller's latest episode_rated value; a 0 ("cleared") reads as None.
+    my_rating: Literal[1, -1] | None
+    sections: list[TranscriptSection]
     steps: list[StepSummary]
 
 
@@ -161,7 +189,8 @@ class EventCreate(BaseModel):
     generate_clicked, profile_updated and settings_changed itself, so a
     client can't forge those into the phase-07 metrics. Every client event
     is about one episode. Payload shapes: play_progress needs
-    {"position_s": number >= 0}; episode_rated needs {"value": 1 | -1}."""
+    {"position_s": number >= 0}; episode_rated needs {"value": 1 | -1 | 0},
+    where 0 clears the rating."""
 
     type: Literal["play_started", "play_progress", "play_completed", "episode_rated"]
     episode_id: int
@@ -175,6 +204,6 @@ class EventCreate(BaseModel):
                 raise ValueError("play_progress needs payload.position_s >= 0")
         if self.type == "episode_rated":
             value = self.payload.get("value")
-            if isinstance(value, bool) or value not in (1, -1):
-                raise ValueError("episode_rated needs payload.value of 1 or -1")
+            if isinstance(value, bool) or value not in (1, -1, 0):
+                raise ValueError("episode_rated needs payload.value of 1, -1 or 0 (clear)")
         return self

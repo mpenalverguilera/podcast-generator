@@ -225,13 +225,16 @@ POST /auth/login                          → JWT
 GET  /me
 GET  /profile/questions                   the guided interview questions
 POST /profile/extract                     free-text answers → proposed profile (not saved)
-GET  /preferences    PUT /preferences     profile + podcast settings
-GET  /voices                              curated voice list with preview URLs
-GET  /episodes       GET /episodes/{id}   status, transcript, sources, steps
-POST /episodes/generate                   {focus_request?} → episode id
+GET  /preferences    PUT /preferences     profile + podcast settings (+ computed next_run_at)
+GET  /preferences/length-options          [{minutes, stories}] for the length slider's estimate
+GET  /voices                              curated voice list with tokenised preview URLs
+GET  /voices/{id}/preview?t=              preview MP3, media token instead of Bearer (D-40)
+GET  /episodes       GET /episodes/{id}   status; detail adds sections (story heading, turns,
+                                          sources), my_rating, audio_url, steps
+POST /episodes/generate                   {focus_request?, target_minutes?} → episode id
 POST /episodes/{id}/retry                 resume from failed stage
-GET  /episodes/{id}/audio                 MP3, range requests
-POST /events                              player telemetry and ratings
+GET  /episodes/{id}/audio?t=              MP3, range requests, media token from audio_url (D-40)
+POST /events                              player telemetry and ratings (rating 0 = cleared)
 GET  /admin/metrics?from&to&include_synthetic   admin only
 ```
 

@@ -77,12 +77,13 @@ def test_post_event_validates_payloads(db) -> None:
         )
         assert resp.status_code == 422, (event_type, payload)
 
-    ok = client.post(
-        "/events",
-        json={"type": "episode_rated", "episode_id": episode.id, "payload": {"value": -1}},
-        headers=auth_headers(token),
-    )
-    assert ok.status_code == 201, ok.text
+    for value in (-1, 1, 0):  # 0 clears the rating
+        ok = client.post(
+            "/events",
+            json={"type": "episode_rated", "episode_id": episode.id, "payload": {"value": value}},
+            headers=auth_headers(token),
+        )
+        assert ok.status_code == 201, ok.text
 
 
 def test_post_event_on_someone_elses_episode_is_403(db) -> None:
