@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.routers import auth, episodes, events, preferences
+from app.api.routers import admin, auth, episodes, events, preferences
 from app.config import get_settings
 from app.db import session_scope
 from app.logging_setup import configure_logging
@@ -45,6 +45,7 @@ app.include_router(auth.router)
 app.include_router(preferences.router)
 app.include_router(episodes.router)
 app.include_router(events.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

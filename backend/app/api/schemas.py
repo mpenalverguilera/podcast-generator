@@ -3,7 +3,7 @@ Kept separate from app/schemas.py, which is the pipeline's own internal value
 types (Script, Usage, ...) -- these are the HTTP contract, not pipeline data."""
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -252,3 +252,100 @@ class EventCreate(BaseModel):
             if isinstance(value, bool) or value not in (1, -1, 0):
                 raise ValueError("episode_rated needs payload.value of 1, -1 or 0 (clear)")
         return self
+
+
+# --- GET /admin/metrics (docs/phases/07-dashboard.md step 2, D-52) -----------
+# Mirrors app/metrics.py's dataclasses field for field; the router maps one
+# onto the other rather than metrics.py depending on this API-layer module.
+
+
+class DailyCountOut(BaseModel):
+    day: date
+    count: int
+
+
+class EpisodesPerDayOut(BaseModel):
+    day: date
+    manual: int
+    scheduled: int
+
+
+class TopicCountOut(BaseModel):
+    topic: str
+    count: int
+
+
+class RetentionCohortOut(BaseModel):
+    cohort_week: date
+    cohort_size: int
+    retained: int
+    retention_rate: float
+
+
+class StageLatencyOut(BaseModel):
+    stage: str
+    p50_ms: float
+    p95_ms: float
+
+
+class StageFailureRateOut(BaseModel):
+    stage: str
+    n: int
+    failure_rate: float
+
+
+class DailyProviderCostOut(BaseModel):
+    day: date
+    provider: str
+    cost_usd: float
+    # True if any row in this day/provider bucket is an estimate (ElevenLabs,
+    # D-12) -- the dashboard must visibly label the $ figure when this is set.
+    cost_is_estimate: bool
+
+
+class RatingByPromptVersionOut(BaseModel):
+    script_prompt_version: str | None
+    avg_rating: float
+    n: int
+
+
+class ProductMetricsOut(BaseModel):
+    dau: list[DailyCountOut]
+    wau: list[DailyCountOut]
+    new_users_per_day: list[DailyCountOut]
+    episodes_per_day: list[EpisodesPerDayOut]
+    listen_through_rate: float | None
+    avg_percent_listened: float | None
+    retention: list[RetentionCohortOut]
+    top_topics: list[TopicCountOut]
+    rating_ratio: float | None
+    focus_request_usage_rate: float | None
+
+
+class OperationsMetricsOut(BaseModel):
+    stage_latency: list[StageLatencyOut]
+    stage_failure_rate: list[StageFailureRateOut]
+    cost_per_day_by_provider: list[DailyProviderCostOut]
+    cost_per_listened_minute: float | None
+    total_spend_usd: float
+    # True if any cost in total_spend_usd came from an estimate (ElevenLabs).
+    total_spend_includes_estimate: bool
+
+
+class QualityMetricsOut(BaseModel):
+    # Passed through from eval/results/<date>.json, trimmed to the columns
+    # eval/results/latest.md's table shows (metrics.CLASSIFIER_EVAL_FIELDS).
+    classifier_eval: list[dict]
+    classifier_eval_date: str | None
+    grounding_flags_avg_initial: float | None
+    grounding_flags_avg_final: float | None
+    rating_by_prompt_version: list[RatingByPromptVersionOut]
+
+
+class AdminMetricsOut(BaseModel):
+    date_from: date
+    date_to: date
+    include_synthetic: bool
+    product: ProductMetricsOut
+    operations: OperationsMetricsOut
+    quality: QualityMetricsOut
