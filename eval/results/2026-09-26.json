@@ -1,0 +1,182 @@
+{
+  "date": "2026-09-26",
+  "eval_now": "2026-09-24T20:00:00+00:00",
+  "classifiers": {
+    "luna": {
+      "classifier": "luna",
+      "n": 60,
+      "keep_gate_accuracy": 0.8833333333333333,
+      "keep_gate_precision": 0.8478260869565217,
+      "keep_gate_recall": 1.0,
+      "keep_gate_roc_auc": 0.9072039072039072,
+      "relevance_accuracy": 0.8666666666666667,
+      "relevance_precision": 0.864406779661017,
+      "relevance_recall": 1.0,
+      "relevance_specificity": 0.1111111111111111,
+      "relevance_roc_auc": 0.761437908496732,
+      "newsworthy_precision": 0.9090909090909091,
+      "newsworthy_recall": 1.0,
+      "newsworthy_roc_auc": 0.894375,
+      "latency_p50_ms": 1875,
+      "latency_p95_ms": 4109,
+      "cost_per_100": 0.014286166666666666,
+      "selection_precision": 0.75
+    },
+    "luna_rerun": {
+      "classifier": "luna_rerun",
+      "n": 60,
+      "keep_gate_accuracy": 0.8666666666666667,
+      "keep_gate_precision": 0.8297872340425532,
+      "keep_gate_recall": 1.0,
+      "keep_gate_roc_auc": 0.894993894993895,
+      "relevance_accuracy": 0.8666666666666667,
+      "relevance_precision": 0.864406779661017,
+      "relevance_recall": 1.0,
+      "relevance_specificity": 0.1111111111111111,
+      "relevance_roc_auc": 0.5882352941176471,
+      "newsworthy_precision": 0.9090909090909091,
+      "newsworthy_recall": 1.0,
+      "newsworthy_roc_auc": 0.895625,
+      "latency_p50_ms": 1952,
+      "latency_p95_ms": 3655,
+      "cost_per_100": 0.014291166666666669,
+      "selection_precision": 0.75
+    },
+    "sol": {
+      "classifier": "sol",
+      "n": 60,
+      "keep_gate_accuracy": 0.9333333333333333,
+      "keep_gate_precision": 0.9069767441860465,
+      "keep_gate_recall": 1.0,
+      "keep_gate_roc_auc": 0.9926739926739927,
+      "relevance_accuracy": 0.8666666666666667,
+      "relevance_precision": 0.864406779661017,
+      "relevance_recall": 1.0,
+      "relevance_specificity": 0.1111111111111111,
+      "relevance_roc_auc": 0.7810457516339869,
+      "newsworthy_precision": 0.9512195121951219,
+      "newsworthy_recall": 0.975,
+      "newsworthy_roc_auc": 0.9925,
+      "latency_p50_ms": 2547,
+      "latency_p95_ms": 3656,
+      "cost_per_100": 0.28598999999999997,
+      "selection_precision": 1.0
+    },
+    "jev": {
+      "classifier": "jev",
+      "n": 60,
+      "keep_gate_accuracy": 0.9833333333333333,
+      "keep_gate_precision": 0.975,
+      "keep_gate_recall": 1.0,
+      "keep_gate_roc_auc": 0.9963369963369964,
+      "relevance_accuracy": 0.9666666666666667,
+      "relevance_precision": 0.9803921568627451,
+      "relevance_recall": 0.9803921568627451,
+      "relevance_specificity": 0.8888888888888888,
+      "relevance_roc_auc": 0.9978213507625272,
+      "newsworthy_precision": 1.0,
+      "newsworthy_recall": 0.975,
+      "newsworthy_roc_auc": 1.0,
+      "latency_p50_ms": 482,
+      "latency_p95_ms": 9571,
+      "cost_per_100": 0.00668584,
+      "selection_precision": 1.0
+    },
+    "jev_v1": {
+      "classifier": "jev_v1",
+      "n": 60,
+      "keep_gate_accuracy": 0.9,
+      "keep_gate_precision": 0.9714285714285714,
+      "keep_gate_recall": 0.8717948717948718,
+      "keep_gate_roc_auc": 0.9578754578754579,
+      "relevance_accuracy": 0.8333333333333334,
+      "relevance_precision": 0.847457627118644,
+      "relevance_recall": 0.9803921568627451,
+      "relevance_specificity": 0.0,
+      "relevance_roc_auc": 0.7113289760348583,
+      "newsworthy_precision": 1.0,
+      "newsworthy_recall": 0.3,
+      "newsworthy_roc_auc": 0.988125,
+      "latency_p50_ms": 403,
+      "latency_p95_ms": 978,
+      "cost_per_100": 0.00633556,
+      "selection_precision": 1.0
+    }
+  },
+  "selection_agreement": {
+    "luna_rerun": 0.6,
+    "sol": 0.3333333333333333,
+    "jev": 0.6,
+    "jev_v1": 0.14285714285714285
+  },
+  "oracle_selection_precision": 1.0,
+  "jev_non_inferiority": {
+    "conditions": [
+      {
+        "name": "keep_gate_auc_delta",
+        "value": 0.08913308913308915,
+        "threshold": -0.05,
+        "passed": true,
+        "detail": "Jev 0.996 vs Luna 0.907"
+      },
+      {
+        "name": "keep_gate_discordant_net",
+        "value": -6,
+        "threshold": 3,
+        "passed": true,
+        "detail": "rows Jev gets wrong that Luna gets right, net of the reverse, vs Luna's own rerun disagreement count"
+      },
+      {
+        "name": "selection_precision_gap",
+        "value": 0.25,
+        "threshold": -0.125,
+        "passed": true,
+        "detail": "Jev 1.00 vs Luna 0.75"
+      },
+      {
+        "name": "cost_and_latency",
+        "value": 0.00668584,
+        "threshold": 0.014286166666666666,
+        "passed": true,
+        "detail": "cost $0.007 vs $0.014/100, p50 482ms vs 1875ms"
+      },
+      {
+        "name": "availability",
+        "value": 0.8619854721549637,
+        "threshold": 0.05,
+        "passed": false,
+        "detail": "356/413 Jev responses were 429/5xx over 6 runs"
+      }
+    ],
+    "quality_pass": true,
+    "availability": {
+      "runs": 6,
+      "responses": 413,
+      "failed": 356,
+      "failure_rate": 0.8619854721549637
+    },
+    "rerun_disagreement": 3,
+    "keep_gate_discordant_net": -6,
+    "bootstrap_keep_gate_auc_gap": {
+      "point": 0.08913308913308915,
+      "ci95_lo": 0.0,
+      "ci95_hi": 0.2136752136752137
+    }
+  },
+  "default_classifier": "sol",
+  "default_reason": "selection agreement is 0.33 (< 0.7) and Sol gains +0.25 on selection_precision (>= 0.1) -- worth ~20x the cost.",
+  "total_spend_usd": 0.192751904,
+  "jev_prompt_version": "jev.v2",
+  "jev_http": {
+    "responses": 0,
+    "rate_limited_429": 0,
+    "server_errors_5xx": 0
+  },
+  "relevance_saturated_share": {
+    "luna": 0.31666666666666665,
+    "luna_rerun": 0.31666666666666665,
+    "sol": 0.31666666666666665,
+    "jev": 0.06666666666666667,
+    "jev_v1": 0.8
+  }
+}

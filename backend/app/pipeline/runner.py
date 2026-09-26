@@ -137,6 +137,7 @@ def run_episode(
                     usage_source=usage.usage_source,
                     provider_request_id=usage.request_id,
                     latency_ms=latency_ms,
+                    fallback_count=usage.fallback_count,
                     started_at=started_at,
                     finished_at=datetime.now(UTC),
                 )

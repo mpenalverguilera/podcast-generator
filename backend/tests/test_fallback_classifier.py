@@ -49,7 +49,7 @@ def test_primary_success_never_calls_fallback() -> None:
 
 
 def test_primary_exception_falls_back_and_counts_it() -> None:
-    """D-39: any exception from the primary (timeout, HTTP error, malformed response) falls
+    """D-41: any exception from the primary (timeout, HTTP error, malformed response) falls
     back to Luna for that one article, and the returned Usage records that it happened."""
     primary = _StubClassifier(raises=TimeoutError("jev timed out"))
     fallback = _StubClassifier(result=_score_result(0.5), usage=Usage(provider="openai"))

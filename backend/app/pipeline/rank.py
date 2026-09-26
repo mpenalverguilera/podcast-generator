@@ -178,6 +178,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     total_latency = 0
     total_units_in = 0
     total_units_out = 0
+    total_fallback_count = 0
     now = datetime.now(UTC)
     candidates: list[Candidate] = []
 
@@ -199,6 +200,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
         total_latency = max(total_latency, usage.latency_ms)  # ran concurrently
         total_units_in += usage.units_in
         total_units_out += usage.units_out
+        total_fallback_count += usage.fallback_count
 
         candidates.append(
             Candidate(
@@ -228,11 +230,12 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     db.flush()
 
     logger.info(
-        "episode %s ranked %d candidates, selected %d stories, cost=$%.4f",
+        "episode %s ranked %d candidates, selected %d stories, cost=$%.4f, %d fallbacks",
         episode.id,
         len(rows),
         len(selected),
         total_cost,
+        total_fallback_count,
     )
     any_usage = next(iter(results.values()))[1]
     return Usage(
@@ -244,4 +247,5 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
         cost_is_estimate=any_usage.cost_is_estimate,
         latency_ms=total_latency,
         usage_source=any_usage.usage_source,
+        fallback_count=total_fallback_count,
     )

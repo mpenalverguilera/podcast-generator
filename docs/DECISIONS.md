@@ -260,3 +260,274 @@ Context: jobs live only in APScheduler's in-memory store, and runs are daemon th
 Decision: (1) at boot, `recover_interrupted_episodes()` marks **every** in-progress episode failed with `error="interrupted"` at the stage it was on (`pending` maps to `planning`), and writes a `pipeline_steps` FAILED row (`provider="system"`, `error="interrupted"`) -- visible on the dashboard and used as a counter. D-36's 30-minute `created_at` threshold is removed: in a single process nothing survives a restart, so age is irrelevant. (2) each recovered episode is auto-resumed from that stage via `mark_resuming()` plus a background thread, for manual and scheduled episodes alike (decided with the user), but only if it has been interrupted at most once, so an episode that itself kills the process can't crash-loop. The daily spend cap still applies. Episodes paused deliberately with the CLI's `--stop-after` (the runner now writes `error="stopped after <stage>"`, cleared by the next successful stage) are marked failed so they stop blocking the user, but never auto-resumed -- otherwise starting the API after `--stop-after scripting` would silently pay for TTS. (3) at boot, `catch_up_due()` checks each scheduled user: anchor = the later of their newest scheduled episode's `created_at` and `preferences.updated_at`; if the first cron time strictly after the anchor is already past, the job is registered with `next_run_time=now`. This is a yes/no, not a count: exactly one catch-up run however long the outage (down Monday and Tuesday on a daily 08:00 schedule, back Wednesday 10:00 -> one episode, then Thursday 08:00 as usual), because `resolve_window_start()` starts the news window at the last ready episode, so one episode covers the whole gap and per-slot runs would only add near-empty duplicates. No age cap on catch-up (decided with the user). (4) `BackgroundScheduler(job_defaults={"misfire_grace_time": 3600})`: a run up to an hour late still fires, once (`coalesce` and `max_instances=1` are already APScheduler defaults). Lifespan order: recover -> auto-resume (each resume committed before its thread starts) -> register jobs with catch-up -> start, so a catch-up for a user whose episode was just resumed hits the in-progress index and skips.
 Alternatives: APScheduler's persistent `SQLAlchemyJobStore`, which would make misfire grace work across restarts natively -- rejected: a second, pickled copy of each schedule in its own table that can drift from `preferences.schedule_cron`, and harder to explain than a few lines derived from our own tables. Draining in-flight runs on graceful shutdown -- rejected: the runner's open session would overwrite whatever shutdown wrote. A periodic in-process watchdog for threads that hang while the process is alive -- not built (cut first); runs take minutes and provider calls have their own timeouts.
 Consequences / accepted limits: a restart just before the next regular fire (07:50 for 08:00) catches up immediately, and the 08:00 run then either finds the catch-up still running (skipped by the index) or produces a thin episode. A CLI `generate` *actively running* while the API boots shares the DB and is treated as interrupted (dev-only). Two API instances would still double-run jobs (ARCHITECTURE §8, unchanged). Verified live on fakes against the test DB: uvicorn hard-killed (`taskkill /F`) during `assembling` kept all seven earlier `pipeline_steps` rows; the restart logged the recovery, wrote the `system`/`interrupted` row, resumed at `assembling` only and reached `ready`. With a `*/2` schedule whose last fire passed during downtime, the restart logged "catch-up run now" and produced exactly one `schedule` episode, which reached `ready`.
+
+<!-- D-39, D-40 and D-41 were written on branch worktree-phase-04-quality as D-37/D-38/D-39 and renumbered here, after main's phase 05b entries, when the branch was actually merged (D-42). -->
+
+## D-39 — Jev classifier built and wired into the eval notebook; the "no real keys" diagnosis in D-31 was half right (2026-09-24, phase 04)
+Context: the user reported that D-31's "no real API keys" story didn't match what they saw locally, and asked whether the real cause was that a new worktree's `.env` (gitignored) never gets the main checkout's real keys, leaving it on `.env.example` placeholders. Checked by comparing every provider key's value (by hash, never printed) between this worktree's `.env` and the main checkout's `.env`: they are now byte-for-byte identical for `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `EXA_API_KEY` and `TYPESAFE_API_KEY`, and none equal the `.env.example` placeholder values. So the general mechanism the user described is real — a worktree's `.env` is gitignored and `git worktree add` doesn't bring it along, `scripts/setup.py` then silently fills it from `.env.example`, and D-31's own account of hitting a sandbox deny rule when trying to copy `.env` in is consistent with that. Someone (outside this session) has since copied the real file in.
+Decision, in three parts:
+1. **Fix the worktree/`.env` gap generally**, since it will recur on every future worktree, not just this one. `scripts/setup.py`'s `ensure_env_file()` now detects a linked worktree via `git rev-parse --git-common-dir` vs `--git-dir` (they differ only in a worktree) and copies the main checkout's `.env` instead of `.env.example` when one exists, printing only the source path, never contents. `CLAUDE.md`'s "Environment setup" section documents this and tells a future session to run `python scripts/setup.py` in a new worktree before any real-provider call, and — if the copy is ever blocked by a sandbox deny rule again — to stop and ask the user to run it themselves rather than working around the block.
+2. **The Jev adapter is real code now, not a stub.** `app/adapters/classifier/jev.py` (`JevClassifier`) wraps TypeSafe's `typesafe-sdk` (0.7.1, added via `uv add`): one `client.system_one(state, questions, model=settings.model_jev)` call per `(article, topic)`, with `relevant`/`newsworthy` as `Noul` (yes/no) questions plus an `already_covered` Noul only when `recent_headlines` is non-empty. `relevance`/`newsworthy` are Jev's own calibrated `P(yes)` directly; `score` is their product, matching how `rank.py` already combines the two axes for every other classifier. Cost: `TYPESAFE_PRICES_PER_1M = {"jev-1.13.0": 0.042}` in `pricing.py`, input tokens only (Jev's output tokens are free per `docs.typesafe.ai/models`), computed exactly from `resp.usage.input_tokens` — not an estimate, unlike ElevenLabs' character-cost estimate (D-12). Model pinned to `jev-1.13.0` (`Settings.model_jev`) rather than a `-latest` alias, so eval numbers stay reproducible run to run. Typed questions live in code (`QUESTIONS_V1`) rather than `app/prompts/*.vN.md`, because Jev's System One primitive takes typed state and named Noul/Choice/Score questions, not a rendered text prompt — the versioned-prompt-file convention doesn't apply to it. `get_classifier()`'s `"jev"` branch now returns `JevClassifier(settings)` instead of raising `NotImplementedError` (reverses that part of D-31). Verified with a stub client (`tests/test_jev_classifier.py`, no network): Noul answers map to `ArticleScoreResult` and `Usage` correctly, `already_covered` is only asked for when there's history, and a missing `TYPESAFE_API_KEY` raises clearly at construction.
+3. **`eval/classifier_eval.ipynb`** now scores Luna, Sol and Jev in one run instead of Luna vs Sol only: a `CLASSIFIERS` registry replaces the two hardcoded model names, Jev's entry is included only when `settings.typesafe_api_key` is set (skipped with a printed note otherwise), and its scores get their own cache file (`results/scores_jev.jsonl`), summary row, plot series and selection-agreement comparison against Luna. Because Jev is *cheaper* than Luna (unlike Sol, which is ~20x pricier), D-29's default-classifier rule doesn't apply to it unchanged: Jev becomes the default only if it doesn't materially lose quality against Luna (loses less than `MATERIAL_GAIN_THRESHOLD` on every comparison axis, or selection agreement is at or above `LOW_AGREEMENT_THRESHOLD`) **and** its p95 latency is no more than 2x Luna's — a non-inferiority check, the mirror image of D-29's "prove Sol's extra cost is worth it" check for Sol. If both Sol and Jev would qualify as the default under their respective rules, the cheaper one wins.
+4. **The real Jev smoke check surfaced a separate, still-open problem.** `uv run --project backend python scripts/smoke/jev_check.py` was run for real against `https://api.typesafe.ai` and got back `401 Cannot authenticate with the server` from TypeSafe itself (`TypeSafeAuthenticationError`, a real HTTP response, not a local exception) — not the "key missing" error `JevClassifier.__init__` raises when `TYPESAFE_API_KEY` is unset. Ruled out everything on this session's side before concluding that: the worktree's `TYPESAFE_API_KEY` value matches the main checkout's exactly (point above); `Settings.model_config`'s `env_file` resolves to this worktree's own `.env` and that file exists (checked via `Path.exists()`, contents never read); no `backend/.env` shadow file exists; no process-level `TYPESAFE_API_KEY` environment variable is shadowing the `.env` value (checked for the variable's presence only, not its value — `env | grep -c '^TYPESAFE_API_KEY='` returned 0); the SDK call shape matches the installed `typesafe_sdk` 0.7.1 exactly (`TypeSafeClient(api_key=...)`, `.system_one(state, questions, model=...)`, `SystemOneResponse.nouls[name].noul`). This session's sandbox denies reading or printing any part of a secret's value ("Credential Materialization"), so whether the key itself is stale, revoked, or was never activated on the TypeSafe account can't be diagnosed further from here — only the account owner can check or regenerate it.
+Alternatives: leaving Jev cut for another phase, as D-31 did — rejected once asked to look into it, since the adapter was already drafted and the worktree-`.env` half of the diagnosis is fixable now and will recur otherwise. Treating the 401 as proof the whole D-31 "blocked on keys" story was simply correct all along — rejected: the keys are present and identical across checkouts, so the honest account is that the *general* worktree/`.env` gap is real and fixed, while Jev's *specific* auth failure is a separate, unresolved issue with the key's validity on TypeSafe's side.
+Consequences: Jev is code-complete and unit-tested (stub-based, no network) but its real authentication is a `[VERIFY]` item — `scripts/smoke/jev_check.py` needs to pass with a valid `TYPESAFE_API_KEY` before `classifier_eval.ipynb` can produce real three-way numbers. `TYPESAFE_API_KEY` in `.env.example` and `CLAUDE.md`'s "Secrets" section already documented `TYPESAFE_API_KEY` (Jev) as optional; no change needed there. The rest of D-31's "left for a human" sequence is unchanged and still applies before the phase's acceptance criteria are met.
+
+## D-40 — Jev's 401 (D-39) was the wrong service, not a bad key: Jev is only reachable through Vercel's AI Gateway (2026-09-24, phase 04)
+Context: the user resolved D-39's open `[VERIFY]` item themselves. Jev isn't served by a standalone `api.typesafe.ai` a client authenticates to directly — TypeSafe's models are only reachable through Vercel's AI Gateway, an HTTP proxy in front of many providers, which needs its own `AI_GATEWAY_API_KEY` (a Vercel credential, not a TypeSafe one). `TYPESAFE_API_KEY` in this repo's `.env` was never a real TypeSafe credential at all — that service doesn't accept direct client connections the way D-39 assumed, hence the 401 regardless of the worktree/`.env` mechanics D-39 spent most of its effort ruling out. The user added `AI_GATEWAY_API_KEY` to `.env` and confirmed manually (`POST https://ai-gateway.vercel.sh/v1/evaluate`, model `typesafe-ai/jev`) that it authenticates.
+Decision:
+1. **Config.** `Settings.typesafe_api_key` → `Settings.ai_gateway_api_key`; every reference to TypeSafe's direct API or the `typesafe-sdk` package is removed (`.env.example`, `CLAUDE.md`'s Secrets section, `backend/pyproject.toml`/`uv.lock` — `uv remove typesafe-sdk`). `Settings.model_jev` changes from a TypeSafe-native version string (`jev-1.13.0`) to the AI Gateway model slug (`typesafe-ai/jev`), since that's the identifier `/v1/evaluate` actually takes.
+2. **Adapter, rewritten on `httpx` (added as a direct dependency via `uv add httpx`; it was already transitive through `openai`/`fastapi`'s test client, now imported directly so it belongs in `pyproject.toml` in its own right).** `JevClassifier` POSTs once per `(article, topic)` to `/v1/evaluate` with three questions sharing one `state` (title, outlet, published date, highlights, the profile's topic(s) with description/include/exclude, the listener's avoid list, and recent headlines):
+   - `topic` (`choice`): criteria = each of `profile.topics`' name → a description string that folds in its include/exclude lists, plus `"none": "not relevant to any listed topic"`. `rank.py`'s `_profile_for_topic` already restricts `profile` to the single topic being scored before calling any classifier (D-23/D-25), and guarantees a `Topic` named `topic` exists in it even when the profile has no real match (a synthetic fallback) — so in practice this is always a one-topic-vs-"none" choice, not a re-classification across every one of the listener's topics, and `topic` is always a valid key into the response's `probabilities`.
+   - `newsworthy` (`boolean`): same true/false criteria text as the original TypeSafe-SDK design in D-39.
+   - `already_covered` (`boolean`): against `state.recent_headlines`, always asked now (D-39's version only asked it when there was history; asking it unconditionally is simpler and a model naturally answers ~0 against an empty list).
+   Mapping: `relevance` = the winning choice's probability *for the specific topic being scored* (`probabilities[topic]`), forced to `0.0` whenever `"none"` wins the choice — a deliberate override, not just "let the raw probability be small", so a near-tie where `"none"` barely edges out `topic` still reads as not-relevant. `newsworthy` = the `newsworthy` boolean's probability directly. `already_covered` = the `already_covered` boolean's probability `> 0.5`. `score` = `relevance * newsworthy`, unchanged from every other classifier.
+3. **Usage and cost.** `units_in`/`units_out` from the response's `usage.inputTokens`/`outputTokens` (exact, confirmed against a real capture: 742/71 tokens for one three-question request). Cost comes from `providerMetadata.gateway.marketCost`, **not** `providerMetadata.gateway.cost`, which a real captured response confirms reads literally `"0"` while the account is on free evaluation credits — `marketCost` is what AI Gateway would actually charge on a paid plan, so it's the only number that lets the eval compare Jev's cost fairly against Luna/Sol once free credits run out. `pricing.py` gets a `vercel_gateway` provider branch that passes `market_cost_usd` straight through (mirroring Exa's `costDollars` pass-through, not a static per-model rate table, since AI Gateway already returns the exact dollar figure) — `cost_is_estimate` is `False`. `generationId` (`providerMetadata.gateway.generationId`) is stored in `Usage.request_id`, the same field every other adapter's provider request id lives in, so it shows up in `pipeline_steps.provider_request_id` for debugging in the AI Gateway dashboard. Latency is measured client-side (`time.perf_counter()` around the POST), since the response body carries no latency figure of its own.
+4. **Verified for real, twice.** `scripts/smoke/jev_check.py` (rewritten for the new adapter) ran two real one-article calls: an on-topic SpaceX launch article scored `relevance=1.000, newsworthy=0.500, already_covered=False` (744 in / 71 out tokens, $0.00003125, 718ms), and an off-topic telescope listicle scored `relevance=0.000, newsworthy=0.020` (738 in / 70 out, $0.000031, 327ms) — confirming both the happy path and the "none wins → relevance forced to 0" path against the live API. A third real call captured the exact response shape into `backend/tests/fixtures/jev_evaluate.json` (no secrets in a response body, so safe to commit); `tests/test_jev_classifier.py` was rewritten to build a stub `httpx.Client` that replays that fixture (`httpx.Response(200, json=..., request=...)`, no network) instead of the old TypeSafe-SDK stub, plus one test that overrides the fixture's `topic` answer to `"none"` and asserts `relevance` is forced to `0.0` even though the target topic still held nonzero probability mass.
+5. **`eval/classifier_eval.ipynb`** needed only a rename (`settings.typesafe_api_key` → `settings.ai_gateway_api_key` in the `CLASSIFIERS` registry's Jev-inclusion check, D-39's mentions of the old design updated to point here) since it was already written against the `Classifier` protocol, not TypeSafe specifics.
+6. **The full three-way eval did not run.** `eval/articles.csv` (built for real from the eval user's real fetched episode, per D-31) exists but all 60 rows are still unlabeled (`label_relevant`/`label_newsworthy` empty) — confirmed by loading it and counting, in both the main checkout and this worktree (copied over, a plain file copy, not a secret). `classifier_eval.ipynb`'s own load-and-validate cell refuses to proceed past that point by design (D-29 point 2: "I label; you don't"), so metrics, selection agreement, and the default-classifier choice for Sol *and* Jev are still open. No classifier calls were made against the 60-row set for this reason — scoring them now, ahead of labeling, was considered (the cache means no double-spend once labels exist) but rejected as scope creep on a request that was about fixing Jev's transport, not about running ahead of the user's own labeling step.
+Alternatives: keeping `TYPESAFE_API_KEY` alongside the new `AI_GATEWAY_API_KEY` in case direct TypeSafe access becomes available later — rejected per the user's explicit "remove every reference to TypeSafe's direct API or the TypeSafe SDK"; if that changes, it's a new decision, not a speculative dual-path now. Sending `topic`'s criteria as nested objects (description + include + exclude) instead of a folded string — rejected because Vercel's `choice` question type's `criteria` is documented as a flat name → string map; the structured version goes into `state.topics` instead, where the model still sees it.
+Consequences: this fully resolves D-39's open `[VERIFY]` item — Jev's transport is fixed and proven live. What's left before the phase's Part B acceptance criteria are met is unchanged in kind from D-31/D-39, just narrower: the user labels `eval/articles.csv` in Excel (save as "CSV UTF-8"), and then the notebook (or, if this sandbox still can't spawn a Jupyter kernel per D-31, the same code run as a plain script from `eval/`) is run for real to produce `results/<date>.json`, `results/latest.md`, and the actual Sol/Jev default-classifier decision with numbers, recorded in a further decision entry once that happens.
+
+## D-41 — Label review, revised metrics, and a Jev non-inferiority rule fixed before running the real eval (2026-09-25, phase 04)
+Context: the user labeled `eval/articles.csv` by hand in Excel (D-31/D-40's outstanding step). The labeled file was saved into the main checkout, not this worktree (a plain copy, no secrets, byte-identical on every column but the three label columns). Before spending on the real three-way run, the user and the assistant reviewed all 60 labels together over three rounds, then fixed the metrics and the Jev decision rule — this entry records both, in that order, so the git history shows the rule was set before the numbers existed.
+
+**1. Label review.** Rules settled in conversation, applied consistently across all 60 rows:
+- Relevance means "would this listener actually want it for this topic", checked against the eval user's saved `interest_profile` (topic `description`/`include`/`exclude`), not just the free-text `eval_user_answers.json` used to generate it. Spot-checking the disputed rows (a Fed-policy speech, several board-game-convention articles) against the saved profile confirmed the review's calls: "economic policy" is explicitly in the finance topic's `include`, and "board game conventions" is explicitly in the tabletop topic's `include` — this also resolves the `[VERIFY]` item D-31 left open about checking against the saved profile rather than the free-text answers.
+- Index/listing/home pages (a site's front page, a program landing page, a launch-schedule aggregator) are always `R0 N0`, regardless of subject.
+- Newsworthy follows `classifier.v1.md`'s own definition: a real event (funding, launch, research, policy, results, studio/publisher news), not PR fluff, a listicle, an evergreen feature, or advice content. A first-party announcement of a real event (a company's own blog post about its own launch) still counts as newsworthy.
+- The same real-world event gets the same newsworthy label across every outlet covering it.
+
+21 of 60 label cells changed (16 rows touched, one previously-blank row filled in). Full before/after
+diff is in the commit for `eval/articles.csv`. Net result: **relevant 51/9, newsworthy 40/20, keep
+(relevant AND newsworthy) 39/21** — printed and asserted by the notebook's load cell.
+
+Two findings worth carrying into `solution.md`:
+- **Home renovation nets only 2 keepable rows out of 12** (the rest are evergreen "how I renovated my kitchen" features, which the profile's own `include: ["renovation stories"]` makes relevant but the classifier prompt's own newsworthy definition correctly marks as not-news). This is a real product finding, not a labeling artifact: Exa's feed for a hobby topic like this is mostly evergreen content, so under the current newsworthy definition it will rarely reach an episode. The fix, if wanted, is a per-topic "features count as news" flag or a topic-specific newsworthy prompt variant — a product/prompt change, out of this phase's scope, not something to paper over by relabeling.
+- **Relevance has only 9 negatives, and 8 of the 9 are index/junk pages that are also newsworthy=0.** Exa's own search already returns on-topic results reliably; newsworthy is where the classifier actually earns its cost. This is why the metrics below lead with a combined gate rather than relevance alone.
+
+**2. What n=60 supports, and the metric changes this implies (amends D-29 point 4).** With ~60
+rows, per-axis ROC-AUC has a roughly ±0.10 95% CI (Hanley-McNeil rule of thumb); a paired
+difference between two classifiers needs a challenger to fix about 7-8 more rows than it breaks
+(~12 points) before it's distinguishable from noise, so `MATERIAL_GAIN_THRESHOLD = 0.10` (D-29's
+existing Sol threshold) is about the smallest real gap this set can detect, and it stays unchanged.
+The rows aren't independent (near-duplicate clusters: the Fed rate hike x6, Google Suncatcher x4,
+Halo/Starfish/Starship x2 each), there is one human annotator, and a third of the labels changed
+during review — so a 1-3 row gap between two classifiers is noise, not signal, on any axis.
+Changes:
+- **Headline metric: the keep gate** (`relevance * newsworthy >= rank._MIN_SCORE`, i.e. exactly
+  what `rank.select_stories` filters candidates on), scored against `label_relevant AND
+  label_newsworthy` (39/21, the best-balanced label available) rather than against relevance alone
+  (51/9, too thin on negatives to trust per the finding above).
+- **Newsworthy stays secondary**; relevance metrics are now explicitly indicative only.
+- **Added:** relevance specificity (true-negative rate, since 8 of 9 negatives are junk pages);
+  selection precision against the labels (the share of each classifier's 8 selected stories that
+  are actually keepable), for each classifier and for an oracle built straight from the labels —
+  agreement-with-Luna alone can't say whether a disagreeing challenger is *better*; a paired
+  discordant-row count on the keep gate between any two classifiers; a paired bootstrap 95% CI
+  (1,000 resamples, seed 0) on a keep-gate AUC gap, reported for context, not gating any decision.
+- **Added: a Luna self-consistency run** (`luna_rerun` — the same `LLMClassifier` instance scored
+  a second time, own cache file, effectively free) purely to measure Luna's own run-to-run
+  keep-gate disagreement, used as the noise floor for the Jev rule below.
+
+**3. Sol rule: unchanged** (D-29 point 4) — Luna stays default unless selection agreement with Sol
+is low (Jaccard < 0.7) and Sol's largest gain across `{relevance_accuracy, relevance_roc_auc,
+newsworthy_roc_auc, keep_gate_roc_auc, selection_precision}` is material (>= 0.10). Sol costs ~20x
+Luna, so the burden of proof is on Sol.
+
+**4. Jev rule: replaced with an explicit non-inferiority rule** (supersedes D-39/D-40's
+`jev_beats_luna`, which mirrored Sol's "prove your gain" shape onto a *cheaper* model — the wrong
+shape, since absence of a proven gain isn't a reason to reject a cheaper model; only evidence of a
+real loss is). Jev becomes the default only if **all four** hold:
+1. Δ keep-gate ROC-AUC (Jev − Luna) ≥ **−0.05**. Half of Sol's own 0.10 material-gain bar: a swap
+   toward a cheaper default should cost at most a small, pre-declared amount of quality, not "no
+   proof it's worse."
+2. keep-gate discordants — #(Jev wrong, Luna right) − #(Luna wrong, Jev right) — ≤ Luna's own
+   `luna` vs `luna_rerun` keep-gate disagreement count. Jev is allowed to be worse than Luna only
+   by as much as Luna already disagrees with itself run to run — a data-driven tolerance instead
+   of a guessed number.
+3. Jev's selection precision ≥ Luna's − **0.125** (one story out of the 8 selected per episode).
+4. Jev's cost/100 (AI Gateway's `marketCost`, D-40) is lower than Luna's, and Jev's p50 latency is
+   no worse than Luna's.
+
+The bootstrap CI on the keep-gate AUC gap is printed next to the verdict but does **not** gate it:
+at n=60 it typically spans about ±0.10, wider than the 0.05 margin, so gating on the CI containing
+only non-negative values would make Jev structurally unselectable regardless of the true numbers.
+If both Sol and Jev qualify, the cheaper one wins.
+
+**5. If Jev is selected, production needs a per-article fallback to Luna before the default
+switches** (not built in the notebook; a follow-up once/if Jev wins): a `FallbackClassifier(jev,
+luna)` behind the same `Classifier` protocol, so no pipeline code changes — on any exception from
+Jev (timeout, HTTP error, malformed response) it scores that one article with Luna instead and
+returns Luna's result; `get_classifier("jev")` would return `FallbackClassifier(JevClassifier(...),
+LLMClassifier(luna))`; a fallback count gets recorded on the ranking stage's `pipeline_steps` row
+(a new nullable column if `PipelineStep` doesn't already have a place for it); tested with fakes
+(Jev raises -> Luna's result used and counted; Jev succeeds -> Luna never called).
+
+Alternatives: keeping D-39/D-40's `jev_beats_luna` (a mirrored "prove your gain" rule) — rejected
+per the user's explicit instruction; it penalizes a cheaper model for merely failing to prove
+superiority rather than for demonstrating a loss, the opposite of what a cost-driven default swap
+should require. Gating the decision on the bootstrap CI instead of point estimates plus fixed
+margins — rejected (same session, user's instruction): report it, don't gate on it, since n=60
+makes the CI itself too wide to be a useful gate at this margin.
+Consequences: results, the actual Jev pass/fail table, and the final default-classifier choice are
+appended below once the real "Restart & Run All" (or its nbconvert equivalent) completes.
+
+**6. Results (real run, 2026-09-25).** Executed via `jupyter nbconvert --to notebook --execute
+--inplace eval/classifier_eval.ipynb` (this sandbox still can't spawn an interactive Jupyter
+kernel for `jupyter lab`, D-31's limitation, but nbconvert's own kernel works fine). Confirmed
+against the eval user's real saved profile (a DB read): the disputed relevance calls from the
+label review (the Fed-policy speech, the board-game-convention articles) do match the saved
+`interest_profile`'s `include` lists, resolving D-31's `[VERIFY]` item for real this time.
+
+Vercel AI Gateway's `/v1/evaluate` returned an intermittent `503` partway through Jev's 60 calls,
+three times in a row across separate `nbconvert` invocations (1, then +30, then +1 rows before
+failing again). Checked before assuming free-tier throttling: Vercel's status page showed AI
+Gateway fully operational; a public GitHub issue titled "Intermittent Vercel HTTP 503 pauses JEV
+categorization every few dozen articles" describes the identical symptom and calls it a backing-
+service problem (the `typesafe-ai` provider behind the gateway), not a Vercel-side rate limit —
+free-tier throttling returns `429` with a `rate_limit_exceeded` body per Vercel's own rate-limits
+docs, not `503`. Added retry-with-exponential-backoff on `{502, 503, 504}` (`score_with_retry`,
+notebook-only, not a production adapter change) rather than continuing to re-invoke `nbconvert` by
+hand; the retry cleared it. This risk (a backing-service 503, not a quota wall) is separate from
+D-41's production `FallbackClassifier` below, which exists for the same class of failure in
+production, not just in this eval.
+
+Final counts: `luna`/`luna_rerun`/`sol`/`jev` each scored all 60 rows. Total spend **$0.1925**
+(under the $0.25 budget) — Luna $0.0086, Luna rerun $0.0086, Sol $0.1716, Jev $0.0038. Verified
+idempotent: a second `nbconvert` run made 0 new calls and reproduced identical numbers and verdict.
+
+| classifier | keep P | keep R | keep ROC-AUC | rel. ROC-AUC | news ROC-AUC | sel. prec. | p50 ms | p95 ms | $/100 |
+|---|---|---|---|---|---|---|---|---|---|
+| luna (current default) | 0.85 | 1.00 | 0.91 | 0.76 | 0.89 | 0.75 | 1875 | 4109 | $0.014 |
+| luna_rerun (noise floor) | 0.83 | 1.00 | 0.89 | 0.59 | 0.90 | 0.75 | 1952 | 3655 | $0.014 |
+| sol | 0.91 | 1.00 | 0.99 | 0.78 | 0.99 | 1.00 | 2547 | 3656 | $0.286 |
+| jev | 0.97 | 0.87 | 0.96 | 0.71 | 0.99 | 1.00 | 403 | 978 | $0.006 |
+
+Luna-vs-Luna rerun keep-gate disagreement (the noise floor): 3/60 rows. Selection agreement
+(Jaccard vs Luna, 8 stories): `luna_rerun`=0.60, `sol`=0.33, `jev`=0.14. Oracle selection precision
+(the best any classifier could score against these labels): 1.00.
+
+**Sol vs Luna: SELECTED.** Selection agreement is 0.33 (< 0.7) and Sol's largest gain is +0.25 on
+selection precision (>= 0.10) — worth ~20x the cost per D-29's rule.
+
+**Jev vs Luna: SELECTED**, all four D-41 non-inferiority conditions pass:
+
+| condition | value | threshold | pass |
+|---|---|---|---|
+| keep_gate_auc_delta | +0.051 | ≥ −0.05 | yes |
+| keep_gate_discordant_net | −1 | ≤ 3 | yes |
+| selection_precision_gap | +0.25 | ≥ −0.125 | yes |
+| cost_and_latency | $0.006 < $0.014/100, p50 403ms ≤ 1875ms | — | yes |
+
+The discordant net is negative: Jev actually corrects one more row than it breaks relative to
+Luna. Bootstrap 95% CI on the keep-gate AUC gap (informational, not gating): +0.051 [−0.049,
++0.175] — the point estimate is a real gain, though the interval (as expected at n=60) is wide
+enough that "no loss" is the safer reading than "a proven gain."
+
+**Both Sol and Jev clear their bars. Jev wins the tie-break** (`min(cost_per_100)`): **jev is the
+new default classifier** (`classifier_provider` default changed `openai` → `jev` in `config.py`).
+Jev is not just non-inferior here — on this eval set it has a higher keep-gate ROC-AUC than Luna
+(0.96 vs 0.91), matches Sol's selection precision (1.00), at less than half Luna's cost and about
+4.7x Luna's p50 speed. Sol remains available (`classifier_provider=openai` +
+`MODEL_CLASSIFIER=gpt-6-sol`) but isn't made the default: it qualifies under D-29's rule, but Jev
+clears the same bar for a fraction of the cost, and D-29's own rule was written to prefer the
+cheaper option once both are legitimate.
+
+One number worth flagging rather than smoothing over: `jev`'s selection agreement with Luna is
+only 0.14 (the two picked almost entirely different stories) — by "agreement with the incumbent"
+alone this would look like a red flag. It isn't one here, because selection *precision* against
+the actual labels is 1.00 for Jev vs 0.75 for Luna: Jev disagrees with Luna by picking stories
+Luna missed, not by picking worse ones. This is exactly why D-41 point 2 added selection precision
+instead of relying on agreement-with-Luna alone — an agreement-only metric would have argued against the classifier that the labels say is actually better.
+
+**Fallback built** (since Jev was selected, per point 5 above): `FallbackClassifier`
+(`app/adapters/classifier/fallback.py`) wraps `primary.score()` in a bare `try/except Exception`
+and retries that one article with `fallback` on any error, tagging the returned `Usage` with
+`fallback_count=1` (0 on the primary's own success) so `rank.run` can sum it into the ranking
+stage's aggregate `Usage` the same way it already sums cost/units. `get_classifier("jev")` now
+returns `FallbackClassifier(JevClassifier(settings), LLMClassifier(get_llm(settings), settings))`
+— the fallback model is whatever `model_classifier` is configured to (still `gpt-6-luna`), not a
+second hardcoded string, so it stays the same "Luna" the eval measured against if `model_classifier`
+is ever changed for some other reason. `Settings.jev_timeout_s` (default 30s, matching the
+previous hardcoded value) replaces `jev.py`'s inline `timeout=30.0`, so the request timeout that
+triggers a fallback is configurable rather than buried in adapter code. `PipelineStep` and the
+initial-schema migration both get a new nullable `fallback_count` column (amending the single
+existing migration, per this repo's established convention — see the gotcha below). Tested with
+stub classifiers, no network (`tests/test_fallback_classifier.py`): the primary's success never
+calls the fallback; any exception from the primary calls the fallback exactly once, and its
+`Usage` (cost, latency, model) passes through unchanged except for `fallback_count=1`.
+
+**A migration gotcha, hit and fixed, worth flagging for whoever works on this repo next.** This
+project keeps one single "initial schema" Alembic revision and amends it in place for new columns
+(D-30 already did this for `grounding_flags_initial/final`) rather than stacking incremental
+revisions. That works cleanly for a *brand-new* database, but `alembic upgrade head` tracks
+applied state by revision **id**, not by diffing file content against the live schema — so on a
+database that was already migrated to `1df08563f23c` before this column was added (both the real
+dev DB, and the separate `<dbname>_test` DB the test suite creates via `Base.metadata.create_all`,
+D-11), `alembic upgrade head` reports nothing to do and the new `fallback_count` column silently
+never gets created, even though the migration file now includes it. This surfaced as a real
+`psycopg.errors.UndefinedColumn` failure in `test_cli.py`'s `test_new_episode_and_run` the first
+time the ranking stage ran for real (fake classifier, real DB) after this change. Fixed by hand
+for both live databases with an additive, non-destructive `ALTER TABLE pipeline_steps ADD COLUMN
+IF NOT EXISTS fallback_count INTEGER` (matching exactly what a fresh `alembic upgrade head` would
+have produced) rather than dropping and recreating either database, since the dev DB holds the
+real eval user's profile and fetched episodes this whole phase depends on. A fresh clone is
+unaffected — `alembic upgrade head` against an empty database runs the (already-amended)
+`upgrade()` in full and gets the column correctly. This convention should be revisited (either
+always stack a new revision, or add a "did you mean to bump the revision id" check) before this
+repo has a real deployed database where a silent no-op migration would be a production incident,
+not a caught-by-tests inconvenience.
+
+Alternatives (this point): stacking a proper new incremental revision instead of amending
+`1df08563f23c` again — would have avoided the gotcha above entirely, and is arguably the more
+correct choice now that the project has a real, already-migrated database; not done here in order
+to stay consistent with D-30's existing precedent in the same file, but flagged above as worth
+revisiting rather than silently repeating a fragile pattern a third time.
+
+**7. Follow-up, worth doing before trusting Jev's numbers further: the eval measures nothing about
+Jev's failure rate.** Point 6's real run hit Vercel AI Gateway's intermittent `503` three times
+before a retry-with-backoff (`score_with_retry`, notebook-only) got past it; that retry logic
+means a failed HTTP call never produces a `Usage` at all (`JevClassifier.score()` raises before
+`return`), so `scores_jev.jsonl` and every metric derived from it — the keep-gate AUC, selection
+precision, and the p50/p95 latency table in point 6 — reflect **only successful calls**. Checked
+directly: the run that produced the final 60 cached rows needed **zero** retries (all the observed
+`503`s happened in earlier attempts, before the retry wrapper existed, and those failed calls left
+no trace in the cache), so this run's reported numbers happen to be uncontaminated by retries. But
+the underlying failure rate itself — roughly 1-in-2 to 1-in-30 requests across the three earlier
+attempts — was real, and it's exactly the risk `FallbackClassifier` (point 5) exists to cover in
+production, yet nothing in `eval/results/latest.md` or the non-inferiority table quantifies it.
+Two gaps this leaves: (a) the eval's cost and latency numbers implicitly assume Jev's happy path,
+not its true unconditional cost/latency including retries and fallbacks; (b) there's no measured
+baseline for how often `PipelineStep.fallback_count` should be expected to be nonzero once Jev is
+live, so a real episode's fallback count can't yet be judged "normal" vs "something's wrong."
+Follow-up, not done here (out of scope for a labeling-and-metrics session): instrument
+`score_with_retry`-equivalent behavior into a real eval axis — e.g. re-run a sample of Jev calls
+enough times to estimate an empirical failure rate with a confidence interval, and report expected
+cost/latency *including* the fallback path's own cost when it fires, not just Jev's success-path
+numbers — before leaning on this eval's cost/latency comparison for anything beyond "directionally
+much cheaper and faster than Luna."
+
+## D-42 — Jev merge completed, Jev re-prompted with graded scores, 429/503 handling, re-run eval: Sol is the default classifier (2026-09-26, phase 04c)
+Context: three problems with the phase-04 Jev work (D-39–D-41) as it reached main. (1) **The "merge" was a file copy** (`8ab0682`): `jev.py`, `fallback.py`, their tests and `eval/results/*` landed on main, but not the code they depend on — `Settings.ai_gateway_api_key`/`model_jev`/`jev_timeout_s`, `pricing.py`'s `vercel_gateway` branch, `Usage.fallback_count`, `PipelineStep.fallback_count`, the rank/runner wiring, the `get_classifier("jev")` factory (still `NotImplementedError` on main), the 3-way notebook and the decision entries. On main 5 Jev/fallback tests failed, and `eval/results/latest.md` could not be reproduced from main's notebook. (2) **Jev's v1 prompt was not comparable with Luna/Sol** (flagged by the user): relevance was a topic-vs-`"none"` `choice` forced to 0 when "none" won, newsworthy a `boolean`; 80% of v1 relevance scores were exactly 0 or 1, so its AUC/keep-gate numbers were computed on saturated scores. Luna and Sol return graded 0–1 relevance and newsworthiness for one topic at a time. (3) **Retry lived only in the notebook**; production fell back to Luna on the first 503.
+
+Decision:
+1. **Merge completed** from `origin/worktree-phase-04-quality`, hunk by hand where main had moved on (phase 05/05b untouched). The branch's D-37/D-38/D-39 are appended as D-39/D-40/D-41 (their numbers collided with main's phase-05b entries) and code comments renumbered. `fallback_count` gets a **new** Alembic revision (`c4e81b7f02d5`, `ADD COLUMN IF NOT EXISTS`, since the dev DB already had it by hand) instead of amending the initial schema — D-41's own migration gotcha.
+2. **Jev v2 prompt** (`JEV_PROMPT_VERSION = "jev.v2"` in `jev.py`; typed questions stay in code, per D-39): `state` carries only the single topic being scored (description/include/exclude, looked up with the same `topic_for` Luna uses), the avoid list, the article and recent headlines. `relevance` and `newsworthy` are Vercel `score` questions with ordered rungs (5 for relevance: off-topic/index page → squarely on-topic matching include; 4 for newsworthy: not news → a specific new event), normalized `score / (rungs - 1)`; definitions follow `classifier.v1.md` and D-41's label rules. `already_covered` stays a `boolean`.
+3. **Failure handling in the adapter** (not the notebook). Research (Vercel [rate limits](https://vercel.com/docs/ai-gateway/rate-limits), [FAQ](https://vercel.com/docs/ai-gateway/faq); a public issue measuring ~2% random 503s on Jev) and today's own evidence: our account is on Vercel's free tier (`cost: "0"`, only `marketCost`), which has lower per-model rate limits; the 429s were rejected before any provider attempt, also with `only: ["typesafe-ai"]`; Vercel now routes Jev to a second host (`digitalocean`) first. So 429 and 503 are handled differently: **502/503/504 and transport errors** are retried up to `JEV_MAX_ATTEMPTS=3` with a 0.5 s/1 s backoff; **429** pauses every Jev call in the process for `JEV_RATE_LIMIT_COOLDOWN_S=300` (module-wide, locked — rank classifies from 8 threads), during which `score()` raises `JevRateLimited` without an HTTP call and `FallbackClassifier` scores the article with the OpenAI classifier; a **`retry-after`** header of ≤10 s is honored on either, a longer one extends the pause. Every 429/5xx is logged. Tested with `httpx.MockTransport`, no network.
+4. **Eval notebook**: Jev calls paced (one every 2.5 s), a 429 pause waited out and the row retried (≤6 pauses per run), rows that still fail are skipped and picked up by the next run from the cache, metrics refused until all 60 rows exist; each run logs its 429/5xx counts to `eval/results/jev_http_log.jsonl`. v1 scores kept frozen as `jev_v1` for comparison. **A fifth Jev condition, availability**: at most 5% of Jev's HTTP responses over every run may be 429/5xx. This was added after observing today's outage (the user's call: Jev only helps if it answers), not declared before the data like conditions 1–4.
+
+Results (all 60 rows per classifier; Luna/Sol/luna_rerun reused from cache, Jev v2 re-scored for $0.004):
+
+| classifier | keep P | keep R | keep ROC-AUC | rel. ROC-AUC | news ROC-AUC | sel. prec. | p50 ms | p95 ms | $/100 |
+|---|---|---|---|---|---|---|---|---|---|
+| luna | 0.85 | 1.00 | 0.91 | 0.76 | 0.89 | 0.75 | 1875 | 4109 | $0.014 |
+| sol | 0.91 | 1.00 | 0.99 | 0.78 | 0.99 | 1.00 | 2547 | 3656 | $0.286 |
+| jev (v2) | 0.97 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 482 | 9571 | $0.007 |
+| jev_v1 | 0.97 | 0.87 | 0.96 | 0.71 | 0.99 | 1.00 | 403 | 978 | $0.006 |
+
+Relevance scores exactly 0 or 1: Jev v2 7%, v1 80%, Luna/Sol 32% — the graded prompt fixed the saturation. **Jev v2 passes all four quality conditions**, by a wider margin than v1 (keep-gate AUC +0.089 over Luna, discordant net −6, bootstrap CI [+0.000, +0.214]). **It fails availability: 356 of 413 Jev responses were 429/5xx over the day's runs.** The first two runs (unpaced, 3 fast retries per row) account for 334 of those 413; the two paced runs alone still saw 22/77 (29%) failures and needed 8 five-minute pauses, far above 5%. Jev's p95 of 9.6 s is retry/backoff time, not model time.
+
+**Verdict by the rules: Sol.** Jev is not selected (availability). Sol clears D-29's bar against Luna (selection agreement 0.33 < 0.7, +0.25 selection precision ≥ 0.10), and with Jev out it is the only qualifying challenger. `MODEL_CLASSIFIER` default → `gpt-6-sol`, `CLASSIFIER_PROVIDER` stays `openai`. Both are `.env` settings: `MODEL_CLASSIFIER=gpt-6-luna` is ~20x cheaper ($0.014 vs $0.286 per 100 articles), and `CLASSIFIER_PROVIDER=jev` uses Jev with the retry/pause/fallback above (its fallback is `MODEL_CLASSIFIER`).
+Alternatives: keeping v1's numbers and only fixing retries — rejected, the saturated scores weren't a fair comparison. Retrying 429s with long backoff inside a ranking call — rejected: Vercel's own guidance is bounded retries and "raise the limit instead of lengthening the backoff", and it would block ranking threads for minutes. Buying AI Gateway credits (removes the gateway's rate limits) — the user's decision, not made here; if bought, rerun the eval (availability is re-measured on every run) before switching the default.
+Consequences / open: the 11 end-to-end fake-pipeline tests fail on main and here since 2026-09-26 — the Exa fixtures have fixed `published_date`s (2026-09-23/24) and rank's 3-day recency half-life now pushes fake candidates under the 0.3 gate, so the fake script comes out too short (608 words). Pre-existing, out of this phase's scope, not fixed. The Jev test fixture's `answers` block follows Vercel's documented `score` shape rather than a captured response (no extra Vercel calls were made for it).
