@@ -303,10 +303,19 @@ class DailyProviderCostOut(BaseModel):
     cost_is_estimate: bool
 
 
+class RatingBreakdownOut(BaseModel):
+    n_total: int
+    n_liked: int
+    n_disliked: int
+    n_not_rated: int
+    pct_liked: float | None
+    pct_disliked: float | None
+    pct_not_rated: float | None
+
+
 class RatingByPromptVersionOut(BaseModel):
     script_prompt_version: str | None
-    avg_rating: float
-    n: int
+    breakdown: RatingBreakdownOut
 
 
 class ProductMetricsOut(BaseModel):
@@ -318,7 +327,7 @@ class ProductMetricsOut(BaseModel):
     avg_percent_listened: float | None
     retention: list[RetentionCohortOut]
     top_topics: list[TopicCountOut]
-    rating_ratio: float | None
+    rating_breakdown: RatingBreakdownOut
     focus_request_usage_rate: float | None
 
 

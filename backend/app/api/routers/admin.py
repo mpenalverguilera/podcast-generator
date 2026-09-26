@@ -14,6 +14,7 @@ from app.api.schemas import (
     OperationsMetricsOut,
     ProductMetricsOut,
     QualityMetricsOut,
+    RatingBreakdownOut,
     RatingByPromptVersionOut,
     RetentionCohortOut,
     StageFailureRateOut,
@@ -32,6 +33,18 @@ DEFAULT_WINDOW_DAYS = 30
 def _default_range() -> tuple[date, date]:
     today = datetime.now(UTC).date()
     return today - timedelta(days=DEFAULT_WINDOW_DAYS - 1), today
+
+
+def _breakdown_out(b: metrics.RatingBreakdown) -> RatingBreakdownOut:
+    return RatingBreakdownOut(
+        n_total=b.n_total,
+        n_liked=b.n_liked,
+        n_disliked=b.n_disliked,
+        n_not_rated=b.n_not_rated,
+        pct_liked=b.pct_liked,
+        pct_disliked=b.pct_disliked,
+        pct_not_rated=b.pct_not_rated,
+    )
 
 
 @router.get("/metrics", response_model=AdminMetricsOut)
@@ -74,7 +87,7 @@ def get_metrics(
                 for r in p.retention
             ],
             top_topics=[TopicCountOut(topic=t.topic, count=t.count) for t in p.top_topics],
-            rating_ratio=p.rating_ratio,
+            rating_breakdown=_breakdown_out(p.rating_breakdown),
             focus_request_usage_rate=p.focus_request_usage_rate,
         ),
         operations=OperationsMetricsOut(
@@ -107,8 +120,7 @@ def get_metrics(
             rating_by_prompt_version=[
                 RatingByPromptVersionOut(
                     script_prompt_version=r.script_prompt_version,
-                    avg_rating=r.avg_rating,
-                    n=r.n,
+                    breakdown=_breakdown_out(r.breakdown),
                 )
                 for r in q.rating_by_prompt_version
             ],

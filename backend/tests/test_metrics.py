@@ -2,7 +2,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 
 from app import metrics
-from app.metrics import PlayEvent, RatingRow, StepRow
+from app.metrics import PlayEvent, RatedSessionRow, StepRow
 from app.models import (
     Article,
     ArticleScore,
@@ -63,20 +63,45 @@ def test_total_listened_minutes_uses_duration_when_completed() -> None:
     assert metrics.total_listened_minutes(events) == (120.0 + 30.0) / 60
 
 
-def test_rating_ratio_and_by_prompt_version() -> None:
-    # fetch_latest_ratings' SQL already restricts value to (1, -1) -- a clear
-    # (0) never reaches these compute functions.
-    ratings = [
-        RatingRow(1, 1, "1"),
-        RatingRow(2, 1, "1"),
-        RatingRow(3, -1, "1"),
-        RatingRow(4, -1, "2"),
+def test_rating_breakdown_overall_and_by_prompt_version() -> None:
+    rows = [
+        RatedSessionRow(1, 10, "1", 1),
+        RatedSessionRow(2, 11, "1", 1),
+        RatedSessionRow(3, 12, "1", -1),
+        RatedSessionRow(4, 13, "1", None),  # never rated
+        RatedSessionRow(5, 14, "2", -1),
     ]
-    assert metrics.rating_ratio(ratings) == 0.5  # 2 up, 2 down overall
+    overall = metrics.rating_breakdown(rows)
+    assert (overall.n_total, overall.n_liked, overall.n_disliked, overall.n_not_rated) == (
+        5,
+        2,
+        2,
+        1,
+    )
+    assert overall.pct_liked == 2 / 5
+    assert overall.pct_disliked == 2 / 5
+    assert overall.pct_not_rated == 1 / 5
+    assert overall.pct_liked + overall.pct_disliked + overall.pct_not_rated == 1.0
 
-    by_version = {r.script_prompt_version: r for r in metrics.rating_by_prompt_version(ratings)}
-    assert by_version["1"].avg_rating == 1 / 3 and by_version["1"].n == 3
-    assert by_version["2"].avg_rating == -1 and by_version["2"].n == 1
+    by_version = {
+        r.script_prompt_version: r.breakdown
+        for r in metrics.rating_breakdown_by_prompt_version(rows)
+    }
+    assert (by_version["1"].n_liked, by_version["1"].n_disliked, by_version["1"].n_not_rated) == (
+        2,
+        1,
+        1,
+    )
+    assert by_version["2"].n_disliked == 1 and by_version["2"].n_total == 1
+
+
+def test_rating_breakdown_empty_has_none_percentages() -> None:
+    # No listened sessions in range -- must not report a misleading 0%/0%/0%.
+    breakdown = metrics.rating_breakdown([])
+    assert breakdown.n_total == 0
+    assert breakdown.pct_liked is None
+    assert breakdown.pct_disliked is None
+    assert breakdown.pct_not_rated is None
 
 
 def test_stage_latency_percentiles() -> None:
@@ -293,6 +318,71 @@ def test_fetch_grounding_flag_counts_ignores_unscripted_episodes(db) -> None:
     initial, final = metrics.fetch_grounding_flag_counts(db, start, end, True)
     assert sorted(initial) == [1, 2]
     assert sorted(final) == [0, 1]
+
+
+def test_fetch_rated_sessions_rating_lookup_is_global_and_sessions_dedupe(db) -> None:
+    """Locks in D-55's design decisions: (1) the rating lookup is all-time,
+    not scoped to [start, end), so a rating dated outside the listened
+    session's window still resolves; (2) a cleared (0) rating and a
+    never-rated session both collapse to rating_value=None; (3) multiple play
+    events for the same (user, episode) still yield exactly one row."""
+    user = _user(db, "listener@example.com")
+    db.flush()
+    window_start = datetime(2026, 3, 1, tzinfo=UTC)
+    episode_a = _episode(db, user, created_at=window_start)  # rated before the window opens
+    episode_b = _episode(db, user, created_at=window_start)  # cleared rating, two play events
+    episode_c = _episode(db, user, created_at=window_start)  # never rated
+    db.add_all(
+        [
+            Event(
+                user_id=user.id,
+                episode_id=episode_a.id,
+                type="play_started",
+                created_at=window_start,
+            ),
+            Event(
+                user_id=user.id,
+                episode_id=episode_a.id,
+                type="episode_rated",
+                payload={"value": 1},
+                created_at=window_start - timedelta(days=5),  # outside [start, end)
+            ),
+            Event(
+                user_id=user.id,
+                episode_id=episode_b.id,
+                type="play_started",
+                created_at=window_start,
+            ),
+            Event(
+                user_id=user.id,
+                episode_id=episode_b.id,
+                type="play_progress",
+                payload={"position_s": 10},
+                created_at=window_start + timedelta(minutes=1),
+            ),
+            Event(
+                user_id=user.id,
+                episode_id=episode_b.id,
+                type="episode_rated",
+                payload={"value": 0},
+                created_at=window_start + timedelta(minutes=2),
+            ),
+            Event(
+                user_id=user.id,
+                episode_id=episode_c.id,
+                type="play_started",
+                created_at=window_start,
+            ),
+        ]
+    )
+    db.commit()
+
+    start, end = metrics._bounds(date(2026, 3, 1), date(2026, 3, 1))
+    rows = {r.episode_id: r for r in metrics.fetch_rated_sessions(db, start, end, True)}
+    assert len(rows) == 3
+    assert rows[episode_a.id].rating_value == 1
+    assert rows[episode_b.id].rating_value is None
+    assert rows[episode_c.id].rating_value is None
 
 
 def test_build_metrics_end_to_end_matches_manual_spot_check(db) -> None:

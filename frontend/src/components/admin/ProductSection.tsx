@@ -161,6 +161,18 @@ function RetentionTable({ product, synthetic }: { product: ProductMetrics; synth
   )
 }
 
+function RatingStatRow({ product }: { product: ProductMetrics }) {
+  const b = product.rating_breakdown
+  const note = (n: number) => `${n} of ${b.n_total} listened`
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      <StatTile label="👍 Liked" value={formatPercent(b.pct_liked)} note={note(b.n_liked)} />
+      <StatTile label="👎 Disliked" value={formatPercent(b.pct_disliked)} note={note(b.n_disliked)} />
+      <StatTile label="Not rated" value={formatPercent(b.pct_not_rated)} note={note(b.n_not_rated)} />
+    </div>
+  )
+}
+
 export function ProductSection({ product, synthetic }: { product: ProductMetrics; synthetic: boolean }) {
   return (
     <section>
@@ -171,11 +183,13 @@ export function ProductSection({ product, synthetic }: { product: ProductMetrics
         <EpisodesPerDayChart product={product} synthetic={synthetic} />
         <TopTopicsChart product={product} synthetic={synthetic} />
         <RetentionTable product={product} synthetic={synthetic} />
-        <div className="grid grid-cols-2 gap-4 self-start">
-          <StatTile label="👍 rating ratio" value={formatPercent(product.rating_ratio)} />
-          <StatTile label="Focus-request usage" value={formatPercent(product.focus_request_usage_rate)} />
-          <StatTile label="Avg. % listened" value={formatPercent(product.avg_percent_listened)} />
-          <StatTile label="Listen-through rate" value={formatPercent(product.listen_through_rate)} />
+        <div className="flex flex-col gap-4 self-start">
+          <RatingStatRow product={product} />
+          <div className="grid grid-cols-3 gap-4">
+            <StatTile label="Focus-request usage" value={formatPercent(product.focus_request_usage_rate)} />
+            <StatTile label="Avg. % listened" value={formatPercent(product.avg_percent_listened)} />
+            <StatTile label="Listen-through rate" value={formatPercent(product.listen_through_rate)} />
+          </div>
         </div>
       </div>
     </section>

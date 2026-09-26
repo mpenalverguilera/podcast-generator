@@ -113,10 +113,20 @@ class DailyProviderCost:
 
 
 @dataclass(frozen=True)
+class RatingBreakdown:
+    n_total: int
+    n_liked: int
+    n_disliked: int
+    n_not_rated: int
+    pct_liked: float | None
+    pct_disliked: float | None
+    pct_not_rated: float | None
+
+
+@dataclass(frozen=True)
 class RatingByPromptVersion:
     script_prompt_version: str | None
-    avg_rating: float
-    n: int
+    breakdown: RatingBreakdown
 
 
 @dataclass(frozen=True)
@@ -129,7 +139,7 @@ class ProductMetrics:
     avg_percent_listened: float | None
     retention: list[RetentionCohort]
     top_topics: list[TopicCount]
-    rating_ratio: float | None
+    rating_breakdown: RatingBreakdown
     focus_request_usage_rate: float | None
 
 
@@ -360,10 +370,10 @@ def listen_through_rate(play_events: list[PlayEvent]) -> float | None:
 def avg_percent_listened(play_events: list[PlayEvent]) -> float | None:
     """Average fraction (0-1) of an episode's duration listened to, same
     0-1 scale as every other ratio metric here (listen_through_rate,
-    rating_ratio, retention_rate, failure_rate) so the one shared frontend
-    formatPercent() -- which multiplies by 100 -- works uniformly. Returning
-    a pre-multiplied 0-100 value here was D-52's bug: the dashboard showed
-    "7119%" (see D-54)."""
+    rating_breakdown's pct_* fields, retention_rate, failure_rate) so the one
+    shared frontend formatPercent() -- which multiplies by 100 -- works
+    uniformly. Returning a pre-multiplied 0-100 value here was D-52's bug:
+    the dashboard showed "7119%" (see D-54)."""
     fractions = []
     for s in _listen_sessions(play_events).values():
         if not s["duration_s"]:
@@ -383,57 +393,96 @@ def total_listened_minutes(play_events: list[PlayEvent]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Product: rating ratio, rating by prompt version
+# Product: rating breakdown (liked / disliked / not rated), by prompt version
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class RatingRow:
+class RatedSessionRow:
+    user_id: int
     episode_id: int
-    value: int
     script_prompt_version: str | None
+    rating_value: int | None  # None: never rated, or latest rating was cleared (0)
 
 
-def fetch_latest_ratings(
+def fetch_rated_sessions(
     db: Session, start: datetime, end: datetime, include_synthetic: bool
-) -> list[RatingRow]:
-    """The latest episode_rated value per (user, episode), joined to the
-    episode's script-writer prompt version. Ratings are append-only and a
-    value of 0 means "cleared" (excluded)."""
+) -> list[RatedSessionRow]:
+    """Every listened session (>=1 play_* event) in [start, end), left-joined
+    to that (user, episode) pair's all-time latest episode_rated value. The
+    rating lookup is deliberately NOT scoped to [start, end): it reflects the
+    episode's current rating state (the same "latest ever" semantics as
+    EpisodeDetail.my_rating, routers/episodes.py), not whether the rating
+    action itself happened inside the window -- a user who listens on day 29
+    of a 30-day range and rates on day 32 should still show as rated, not as
+    "not rated" (docs/DECISIONS.md D-55). A cleared (0) or missing rating both
+    collapse to NULL here, since both mean "not rated" for this metric."""
     rows = db.execute(
         text(
             """
-            WITH latest AS (
-                SELECT DISTINCT ON (ev.user_id, ev.episode_id)
-                       ev.episode_id, (ev.payload ->> 'value')::int AS value
+            WITH sessions AS (
+                SELECT DISTINCT ev.user_id, ev.episode_id
                 FROM events ev
-                WHERE ev.type = 'episode_rated' AND ev.created_at >= :start AND ev.created_at < :end
+                WHERE ev.type IN ('play_started', 'play_progress', 'play_completed')
+                  AND ev.created_at >= :start AND ev.created_at < :end
+                  AND (:include_synthetic OR NOT ev.is_synthetic)
+            ),
+            latest_rating AS (
+                SELECT DISTINCT ON (ev.user_id, ev.episode_id)
+                       ev.user_id, ev.episode_id, (ev.payload ->> 'value')::int AS value
+                FROM events ev
+                WHERE ev.type = 'episode_rated'
                   AND (:include_synthetic OR NOT ev.is_synthetic)
                 ORDER BY ev.user_id, ev.episode_id, ev.id DESC
             )
-            SELECT latest.episode_id, latest.value, e.prompt_versions ->> 'script_writer' AS version
-            FROM latest JOIN episodes e ON e.id = latest.episode_id
-            WHERE latest.value IN (1, -1) AND (:include_synthetic OR NOT e.is_synthetic)
+            SELECT s.user_id, s.episode_id,
+                   e.prompt_versions ->> 'script_writer' AS version,
+                   CASE WHEN lr.value IN (1, -1) THEN lr.value ELSE NULL END AS rating_value
+            FROM sessions s
+            JOIN episodes e ON e.id = s.episode_id
+            LEFT JOIN latest_rating lr ON lr.user_id = s.user_id AND lr.episode_id = s.episode_id
+            WHERE (:include_synthetic OR NOT e.is_synthetic)
             """
         ),
         {"start": start, "end": end, "include_synthetic": include_synthetic},
     ).all()
-    return [RatingRow(row.episode_id, row.value, row.version) for row in rows]
-
-
-def rating_ratio(ratings: list[RatingRow]) -> float | None:
-    up = sum(1 for r in ratings if r.value == 1)
-    down = sum(1 for r in ratings if r.value == -1)
-    return up / (up + down) if (up + down) else None
-
-
-def rating_by_prompt_version(ratings: list[RatingRow]) -> list[RatingByPromptVersion]:
-    by_version: dict[str | None, list[int]] = {}
-    for r in ratings:
-        by_version.setdefault(r.script_prompt_version, []).append(r.value)
     return [
-        RatingByPromptVersion(version, sum(values) / len(values), len(values))
-        for version, values in sorted(by_version.items(), key=lambda kv: (kv[0] is None, kv[0]))
+        RatedSessionRow(row.user_id, row.episode_id, row.version, row.rating_value) for row in rows
+    ]
+
+
+def _rating_breakdown(rows: list[RatedSessionRow]) -> RatingBreakdown:
+    n_total = len(rows)
+    n_liked = sum(1 for r in rows if r.rating_value == 1)
+    n_disliked = sum(1 for r in rows if r.rating_value == -1)
+    n_not_rated = n_total - n_liked - n_disliked
+    if n_total == 0:
+        return RatingBreakdown(0, 0, 0, 0, None, None, None)
+    return RatingBreakdown(
+        n_total,
+        n_liked,
+        n_disliked,
+        n_not_rated,
+        n_liked / n_total,
+        n_disliked / n_total,
+        n_not_rated / n_total,
+    )
+
+
+def rating_breakdown(rows: list[RatedSessionRow]) -> RatingBreakdown:
+    """Overall like/dislike/not-rated split across every listened session --
+    the three percentages always sum to 1.0 (n_total > 0) since they are a
+    partition of the same denominator, not three independent ratios."""
+    return _rating_breakdown(rows)
+
+
+def rating_breakdown_by_prompt_version(rows: list[RatedSessionRow]) -> list[RatingByPromptVersion]:
+    by_version: dict[str | None, list[RatedSessionRow]] = {}
+    for r in rows:
+        by_version.setdefault(r.script_prompt_version, []).append(r)
+    return [
+        RatingByPromptVersion(version, _rating_breakdown(group))
+        for version, group in sorted(by_version.items(), key=lambda kv: (kv[0] is None, kv[0]))
     ]
 
 
@@ -629,7 +678,7 @@ def build_metrics(
     user_days = _fetch_event_user_days(db, start, end, include_synthetic)
     dau, wau = active_users_by_day(user_days, date_from, date_to)
     play_events = fetch_play_events(db, start, end, include_synthetic)
-    ratings = fetch_latest_ratings(db, start, end, include_synthetic)
+    rated_sessions = fetch_rated_sessions(db, start, end, include_synthetic)
     steps = fetch_pipeline_steps(db, start, end, include_synthetic)
     spend_usd, spend_is_estimate = total_spend(steps)
     listened_minutes = total_listened_minutes(play_events)
@@ -647,7 +696,7 @@ def build_metrics(
         avg_percent_listened=avg_percent_listened(play_events),
         retention=fetch_retention_cohorts(db, start, end, include_synthetic),
         top_topics=fetch_top_topics(db, start, end, include_synthetic),
-        rating_ratio=rating_ratio(ratings),
+        rating_breakdown=rating_breakdown(rated_sessions),
         focus_request_usage_rate=fetch_focus_request_usage_rate(db, start, end, include_synthetic),
     )
     operations = OperationsMetrics(
@@ -663,7 +712,7 @@ def build_metrics(
         classifier_eval_date=eval_date,
         grounding_flags_avg_initial=_avg(grounding_initial),
         grounding_flags_avg_final=_avg(grounding_final),
-        rating_by_prompt_version=rating_by_prompt_version(ratings),
+        rating_by_prompt_version=rating_breakdown_by_prompt_version(rated_sessions),
     )
     return AdminMetrics(
         date_from=date_from,

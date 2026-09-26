@@ -231,10 +231,19 @@ export interface DailyProviderCostPoint {
   cost_is_estimate: boolean
 }
 
+export interface RatingBreakdown {
+  n_total: number
+  n_liked: number
+  n_disliked: number
+  n_not_rated: number
+  pct_liked: number | null
+  pct_disliked: number | null
+  pct_not_rated: number | null
+}
+
 export interface RatingByPromptVersionRow {
   script_prompt_version: string | null
-  avg_rating: number
-  n: number
+  breakdown: RatingBreakdown
 }
 
 export interface ProductMetrics {
@@ -246,7 +255,7 @@ export interface ProductMetrics {
   avg_percent_listened: number | null
   retention: RetentionCohortRow[]
   top_topics: TopicCountPoint[]
-  rating_ratio: number | null
+  rating_breakdown: RatingBreakdown
   focus_request_usage_rate: number | null
 }
 

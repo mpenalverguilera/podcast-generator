@@ -1,6 +1,8 @@
 // Shared Recharts tooltip content: value leads (bold, high-contrast), series
 // name follows (dataviz skill, interaction.md "values lead, labels follow"),
 // keyed by a short line stroke rather than a filled swatch.
+type TooltipEntry = { name?: string; value?: string | number; color?: string; payload?: Record<string, unknown> }
+
 export function ChartTooltip({
   active,
   label,
@@ -9,8 +11,8 @@ export function ChartTooltip({
 }: {
   active?: boolean
   label?: string | number
-  payload?: { name?: string; value?: string | number; color?: string }[]
-  formatValue?: (value: string | number) => string
+  payload?: TooltipEntry[]
+  formatValue?: (value: string | number, entry?: TooltipEntry) => string
 }) {
   if (!active || !payload || payload.length === 0) return null
   return (
@@ -21,7 +23,7 @@ export function ChartTooltip({
           <li key={`${entry.name}-${i}`} className="flex items-center gap-1.5">
             <span className="inline-block h-0.5 w-3 rounded-full" style={{ backgroundColor: entry.color }} />
             <span className="font-semibold text-slate-900">
-              {entry.value !== undefined ? formatValue(entry.value) : '—'}
+              {entry.value !== undefined ? formatValue(entry.value, entry) : '—'}
             </span>
             <span className="text-slate-400">{entry.name}</span>
           </li>

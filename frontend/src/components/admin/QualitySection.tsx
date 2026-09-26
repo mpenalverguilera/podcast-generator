@@ -1,7 +1,7 @@
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { QualityMetrics } from '../../api/types'
-import { formatCurrency } from '../../lib/format'
-import { CHART_AXIS, CHART_GRID, SERIES } from '../../lib/chartPalette'
+import { formatCurrency, formatPercent } from '../../lib/format'
+import { CHART_AXIS, CHART_GRID, SERIES, STATUS_CRITICAL } from '../../lib/chartPalette'
 import { ChartCard, EmptyChart } from './ChartCard'
 import { ChartTooltip } from './ChartTooltip'
 import { StatTile } from './StatTile'
@@ -70,29 +70,59 @@ function ClassifierEvalTable({ quality, synthetic }: { quality: QualityMetrics; 
 }
 
 function RatingByPromptVersionChart({ quality, synthetic }: { quality: QualityMetrics; synthetic: boolean }) {
-  const data = quality.rating_by_prompt_version.map((r) => ({
-    version: r.script_prompt_version ?? 'unrated',
-    avg_rating: r.avg_rating,
-    n: r.n,
-  }))
+  const data = quality.rating_by_prompt_version.map((r) => {
+    const b = r.breakdown
+    return {
+      version: `${r.script_prompt_version ?? 'unrated'} (n=${b.n_total})`,
+      pct_liked: b.pct_liked ?? 0,
+      pct_disliked: b.pct_disliked ?? 0,
+      pct_not_rated: b.pct_not_rated ?? 0,
+      n_liked: b.n_liked,
+      n_disliked: b.n_disliked,
+      n_not_rated: b.n_not_rated,
+    }
+  })
+  const segmentCount: Record<string, 'n_liked' | 'n_disliked' | 'n_not_rated'> = {
+    Liked: 'n_liked',
+    Disliked: 'n_disliked',
+    'Not rated': 'n_not_rated',
+  }
   return (
-    <ChartCard title="Rating by script prompt version" hint="Avg. of 👍(+1) / 👎(−1)" synthetic={synthetic}>
+    <ChartCard
+      title="Rating by script prompt version"
+      hint="Share of listened sessions that were liked / disliked / not rated"
+      synthetic={synthetic}
+    >
       {data.length === 0 ? (
         <EmptyChart />
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={data} margin={{ left: -20 }}>
-            <CartesianGrid vertical={false} stroke={CHART_GRID} />
-            <XAxis dataKey="version" {...AXIS_PROPS} />
-            <YAxis domain={[-1, 1]} {...AXIS_PROPS} />
+        <ResponsiveContainer width="100%" height={Math.max(160, data.length * 40)}>
+          <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
+            <CartesianGrid horizontal={false} stroke={CHART_GRID} />
+            <XAxis type="number" domain={[0, 1]} tickFormatter={(v) => formatPercent(Number(v))} {...AXIS_PROPS} />
+            <YAxis type="category" dataKey="version" width={150} {...AXIS_PROPS} />
             <Tooltip
               content={
                 <ChartTooltip
-                  formatValue={(v) => Number(v).toFixed(2)}
+                  formatValue={(v, entry) => {
+                    const key = entry?.name ? segmentCount[entry.name] : undefined
+                    const n = key ? (entry?.payload?.[key] as number | undefined) : undefined
+                    return n == null ? formatPercent(Number(v)) : `${formatPercent(Number(v))} (n=${n})`
+                  }}
                 />
               }
             />
-            <Bar dataKey="avg_rating" name="Avg. rating" fill={SERIES.blue} radius={[4, 4, 0, 0]} maxBarSize={40} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="pct_liked" name="Liked" stackId="rating" fill={SERIES.aqua} maxBarSize={22} />
+            <Bar dataKey="pct_disliked" name="Disliked" stackId="rating" fill={STATUS_CRITICAL} maxBarSize={22} />
+            <Bar
+              dataKey="pct_not_rated"
+              name="Not rated"
+              stackId="rating"
+              fill={SERIES.gray}
+              radius={[0, 4, 4, 0]}
+              maxBarSize={22}
+            />
           </BarChart>
         </ResponsiveContainer>
       )}
