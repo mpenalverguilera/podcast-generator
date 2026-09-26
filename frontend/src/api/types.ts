@@ -185,3 +185,96 @@ export interface EventCreate {
   episode_id: number
   payload?: Record<string, unknown>
 }
+
+// --- GET /admin/metrics (docs/phases/07-dashboard.md, D-52) -----------------
+// Mirrors backend/app/api/schemas.py's Admin*Out models field for field.
+
+export interface DailyCountPoint {
+  day: string
+  count: number
+}
+
+export interface EpisodesPerDayPoint {
+  day: string
+  manual: number
+  scheduled: number
+}
+
+export interface TopicCountPoint {
+  topic: string
+  count: number
+}
+
+export interface RetentionCohortRow {
+  cohort_week: string
+  cohort_size: number
+  retained: number
+  retention_rate: number
+}
+
+export interface StageLatencyPoint {
+  stage: string
+  p50_ms: number
+  p95_ms: number
+}
+
+export interface StageFailureRatePoint {
+  stage: string
+  n: number
+  failure_rate: number
+}
+
+export interface DailyProviderCostPoint {
+  day: string
+  provider: string
+  cost_usd: number
+  cost_is_estimate: boolean
+}
+
+export interface RatingByPromptVersionRow {
+  script_prompt_version: string | null
+  avg_rating: number
+  n: number
+}
+
+export interface ProductMetrics {
+  dau: DailyCountPoint[]
+  wau: DailyCountPoint[]
+  new_users_per_day: DailyCountPoint[]
+  episodes_per_day: EpisodesPerDayPoint[]
+  listen_through_rate: number | null
+  avg_percent_listened: number | null
+  retention: RetentionCohortRow[]
+  top_topics: TopicCountPoint[]
+  rating_ratio: number | null
+  focus_request_usage_rate: number | null
+}
+
+export interface OperationsMetrics {
+  stage_latency: StageLatencyPoint[]
+  stage_failure_rate: StageFailureRatePoint[]
+  cost_per_day_by_provider: DailyProviderCostPoint[]
+  cost_per_listened_minute: number | null
+  total_spend_usd: number
+  total_spend_includes_estimate: boolean
+}
+
+// classifier_eval rows are passed through from eval/results/<date>.json,
+// trimmed to CLASSIFIER_EVAL_FIELDS (backend/app/metrics.py) -- kept loose
+// here rather than duplicating that field list.
+export interface QualityMetrics {
+  classifier_eval: Record<string, string | number | null>[]
+  classifier_eval_date: string | null
+  grounding_flags_avg_initial: number | null
+  grounding_flags_avg_final: number | null
+  rating_by_prompt_version: RatingByPromptVersionRow[]
+}
+
+export interface AdminMetrics {
+  date_from: string
+  date_to: string
+  include_synthetic: boolean
+  product: ProductMetrics
+  operations: OperationsMetrics
+  quality: QualityMetrics
+}

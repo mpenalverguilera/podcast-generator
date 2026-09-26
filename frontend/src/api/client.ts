@@ -1,4 +1,5 @@
 import type {
+  AdminMetrics,
   EpisodeCreated,
   EpisodeDetail,
   EpisodeGenerateRequest,
@@ -115,4 +116,13 @@ export const api = {
   // keepalive lets the last play_progress survive the tab being closed.
   sendEvent: (body: EventCreate) =>
     request<{ id: number }>('/events', { method: 'POST', body: JSON.stringify(body), keepalive: true }),
+
+  adminMetrics: (params: { from: string; to: string; includeSynthetic: boolean }) =>
+    request<AdminMetrics>(
+      `/admin/metrics?${new URLSearchParams({
+        from: params.from,
+        to: params.to,
+        include_synthetic: String(params.includeSynthetic),
+      })}`,
+    ),
 }
