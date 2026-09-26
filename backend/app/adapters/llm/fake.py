@@ -1,3 +1,5 @@
+import json
+import math
 import re
 import time
 
@@ -7,6 +9,7 @@ from app.schemas import RenderedPrompt, Usage
 
 _SHORT_ID_RE = re.compile(r"\[(a\d+)\]")
 _WORD_TARGET_RE = re.compile(r"about (\d+) words")
+_DRAFT_JSON_RE = re.compile(r"<draft_json>\s*(.*?)\s*</draft_json>", re.DOTALL)
 _FAKE_SENTENCE = "This is a fake sentence for testing scripts. "
 
 # Canned payloads keyed by schema class name, for schemas whose all-default
@@ -71,56 +74,84 @@ _REGISTRY: dict[str, dict] = {
 }
 
 
-def _fake_script(prompt_text: str) -> dict:
-    """Script can't be a static _REGISTRY fixture: its source_ids must be a
-    subset of the short article ids (e.g. "a12") that script.py generated for
-    *this* episode's real, DB-assigned article ids, which a canned fixture
-    can't predict. Instead, pull the ids straight out of the rendered prompt's
-    `[aNN]` article block and build a script around exactly those -- still
-    fully deterministic for a given prompt.
+def _ids_in(prompt_text: str) -> list[str]:
+    """The `[aNN]` short article ids in a rendered prompt, first-seen order,
+    no repeats. They can't be a static fixture: they come from this
+    episode's DB-assigned article ids."""
+    return list(dict.fromkeys(_SHORT_ID_RE.findall(prompt_text))) or ["a0"]
 
-    Length follows the prompt's own "about N words" target: intro (64 words)
-    and outro (40) are fixed, and each story's three turns share the rest in
-    8-word sentences, so the script lands inside the +-15% budget for any
-    episode length and story count (docs/DECISIONS.md D-40).
-    """
-    ids = _SHORT_ID_RE.findall(prompt_text) or ["a0"]
-    target = _WORD_TARGET_RE.search(prompt_text)
-    per_story_words = (int(target.group(1)) - 104) / len(ids) if target else 168
-    per_turn = max(1, round(per_story_words / 3 / 8))
+
+def _fake_outline(prompt_text: str) -> dict:
+    """One section per `[aNN]` id in the outline prompt, story_ids s1.., each
+    asking for 100 words (script.py normalizes these to the story budget)."""
     sections = [
         {
-            "kind": "intro",
-            "story_id": None,
-            "source_ids": [],
-            "turns": [
-                {"speaker": "host_a", "text": _FAKE_SENTENCE * 4},
-                {"speaker": "host_b", "text": _FAKE_SENTENCE * 4},
-            ],
+            "story_id": f"s{i + 1}",
+            "source_ids": [sid],
+            "topic_label": "fake topic",
+            "headline": f"Fake headline {i + 1}",
+            "angle": "a fake angle",
+            "why_listener_cares": "a fake reason",
+            "depth": "headlines",
+            "target_words": 100,
+            "key_facts": [f"fake fact {i + 1}"],
+            "must_not_cover": [],
+            "bridge_in": None if i == 0 else "a fake bridge",
         }
+        for i, sid in enumerate(_ids_in(prompt_text))
     ]
-    for i, sid in enumerate(ids):
-        sections.append(
-            {
-                "kind": "story",
-                "story_id": f"s{i + 1}",
-                "source_ids": [sid],
-                "turns": [
-                    {"speaker": "host_a", "text": _FAKE_SENTENCE * per_turn},
-                    {"speaker": "host_b", "text": _FAKE_SENTENCE * per_turn},
-                    {"speaker": "host_a", "text": _FAKE_SENTENCE * per_turn},
-                ],
-            }
-        )
-    sections.append(
-        {
-            "kind": "outro",
-            "story_id": None,
-            "source_ids": [],
-            "turns": [{"speaker": "host_b", "text": _FAKE_SENTENCE * 5}],
-        }
-    )
-    return {"title": "Fake Episode", "summary": "A fake summary for testing.", "sections": sections}
+    return {"cold_open_hook": "A fake hook.", "sections": sections, "dropped": []}
+
+
+def _fake_section(prompt_text: str) -> dict:
+    """Sized from the prompt's own "about N words" target, spread over enough
+    alternating turns (>=3) that no turn nears the 600-character limit, so
+    the draft passes validate_section at any episode length (D-40, D-59)."""
+    target = _WORD_TARGET_RE.search(prompt_text)
+    words = int(target.group(1)) if target else 120
+    n_turns = max(3, math.ceil(words / 64))
+    per_turn = max(1, round(words / n_turns / 8))  # _FAKE_SENTENCE is 8 words
+    speakers = ["host_a", "host_b"]
+    return {
+        "turns": [
+            {"speaker": speakers[i % 2], "text": _FAKE_SENTENCE * per_turn} for i in range(n_turns)
+        ]
+    }
+
+
+def _fake_polish(prompt_text: str) -> dict:
+    """Echoes the drafted story sections (the JSON between the <draft_json>
+    markers polish.v1.md puts them in) unchanged, with a fake intro/outro."""
+    match = _DRAFT_JSON_RE.search(prompt_text)
+    stories = json.loads(match.group(1)) if match else []
+    intro = {
+        "kind": "intro",
+        "story_id": None,
+        "source_ids": [],
+        "turns": [
+            {"speaker": "host_a", "text": _FAKE_SENTENCE * 2},
+            {"speaker": "host_b", "text": _FAKE_SENTENCE * 2},
+        ],
+    }
+    outro = {
+        "kind": "outro",
+        "story_id": None,
+        "source_ids": [],
+        "turns": [{"speaker": "host_b", "text": _FAKE_SENTENCE * 3}],
+    }
+    return {
+        "title": "Fake Episode",
+        "summary": "A fake summary for testing.",
+        "sections": [intro, *stories, outro],
+    }
+
+
+# Schemas whose fixture has to be derived from the prompt itself.
+_FROM_PROMPT = {
+    "Outline": _fake_outline,
+    "SectionDraft": _fake_section,
+    "PolishedScript": _fake_polish,
+}
 
 
 class FakeLLM:
@@ -133,8 +164,8 @@ class FakeLLM:
     ) -> tuple[BaseModel, Usage]:
         start = time.monotonic()
         name = schema.__name__
-        if name == "Script":
-            parsed = schema.model_validate(_fake_script(prompt.text))
+        if name in _FROM_PROMPT:
+            parsed = schema.model_validate(_FROM_PROMPT[name](prompt.text))
         elif name in _REGISTRY:
             parsed = schema.model_validate(_REGISTRY[name])
         else:

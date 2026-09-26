@@ -649,3 +649,82 @@ One shared `RatingBreakdown` dataclass (`n_total`, `n_liked`, `n_disliked`, `n_n
 Per-chunk speed didn't drop under concurrency (37–42 chars/s vs 36–48 sequential). Projected on the four baseline runs at 4 workers (2.66× on voicing, other stages unchanged): episode 1 222 → ~132 s (−41%), 2 270 → ~165 s (−39%), 10 177 → ~102 s (−42%), 11 209 → ~139 s (−33%). Voicing drops from ~60% of generation time to ~30–44%, and scripting (27–74 s) is the next bottleneck.
 **Alternatives.** asyncio + the SDK's async client -- rejected: the pipeline is synchronous end to end, and a thread pool around a blocking call is the smallest change. A token bucket / requests-per-minute limiter -- not needed, since the provider limits concurrency, not rate. Default 2 (Free-plan floor) -- rejected once 4 was measured to work; 2 gave only 1.6×.
 **Consequences / open.** Episode 3's run hit `uq_episodes_one_in_progress_per_user` when the runner committed (episode 7, same user, was parked at `assembling` by `--stop-after voicing`). Its voicing succeeded and the audio is on disk, but the runner's commit rolled back, so that run's ~$0.58 has no `pipeline_steps` row. That's a pre-existing runner gap (a commit failure after a paid stage loses the usage row), not fixed here. [VERIFY] Whether ElevenLabs bills a 5xx that failed mid-generation; the docs say failed requests aren't charged, and retries are capped at 3 either way. 194 tests pass (incl. the concurrency cap, the cap shared across adapter instances, resume, partial failure, the spend pre-flight, and adapter retry/no-retry); ruff clean.
+
+## D-59 — Scripting v2: outline → sequential grounded sections → polish (2026-09-26, phase 10)
+**Context.** Scripting v1 was one call, all articles in and the full script out. Reading the code showed these blind spots:
+- The writer never saw why an article was picked: its topic, the listener's topic description, include/exclude, depth, or the avoid list.
+- Validation and grounding retries resent the prompt *without* the failed draft, so a "fix" was a blind reroll that could add new unsupported claims.
+- The writer saw 6,000 characters per source but the grounder only 4,000, so true facts from the tail got flagged.
+- The word budget ignored the story count and used 150 wpm, but D-28 measured about 136 (973 words → 428 s).
+- The intro said "you asked about X" even when no focus article was selected.
+- Highlights-only sources looked like full articles.
+- Outlets were read out as domains (`www.reuters.com`), and the literal topic `"focus"` leaked into prompts.
+
+**Decision.** Everything stays inside the existing SCRIPTING stage. There is no new stage, status or migration, and `episode.script` is still a `Script` that `voice.py` and the transcript API read unchanged.
+1. **Outline** (`outline.v1`, one `MODEL_SCRIPT` call). It sees every source as `[aNN] Outlet — date — title — topic — depth — full text | highlights only` plus highlights, all topic profiles, the avoid list, the focus request, recent headlines and the story budget. It returns order, angle, why-the-listener-cares, key facts, must-not-cover, a bridge and target words per section, and it may merge duplicate coverage or drop no-news sources. `validate_outline` (pure) checks that every selected id appears exactly once across sections ∪ dropped, that story ids are unique and that there is at least one section. On failure there is one retry that shows the previous outline JSON and the errors; a second failure fails the stage. Code then rescales `target_words` to the story budget and reorders `episode_items`: positions follow the outline, dropped items go last, and merged sources share a `story_id`, so the sources list follows the audio.
+2. **Sections** (`section_writer.v1`), **sequential**. Each call sees:
+   - the whole outline, with its own entry highlighted;
+   - the full text of *only its own sources*. Writer and grounder share one limit, `grounding.SOURCE_CHARS = 12000`, applied once to the same header + body text;
+   - the listener's profile for that topic, and the avoid list;
+   - the sections already written.
+
+   `validate_section` (pure) requires ≥3 turns, both hosts, no turn over 600 characters, no `Name:` prefix, and words within ±25% of target. A failure gets one patch call; a length-only failure after that is accepted with a warning, anything else fails the stage. Each section is then grounded against its own sources (`grounding_check.v2`). If anything is flagged, one **patch** (`section_patch.v1`) sees the draft, the flags with their suggested fixes and the sources, and is told to change only what's needed. After one re-check, the version with fewer flags wins; the rest are recorded.
+3. **Polish** (`polish.v1`) writes the intro and the outro:
+   - intro: a cold open, one "AI-generated briefing" line, a preview, no host self-introductions, and "you asked about X" only if a focus section exists;
+   - outro: at most 2 turns.
+
+   It may rewrite only the first and last two turns of each story section, and may add audio tags. Code checks the result:
+   - The intro and outro must be present: one retry, then the stage fails.
+   - If the story sections don't keep the same story_ids and source_ids in the same order, all drafts are kept.
+   - Only story sections whose words changed (tags stripped) are grounded, in one call together with the intro and outro, which are checked against all selected sources.
+   - A changed story section with any flag is **reverted** to its grounded draft.
+   - A flagged intro or outro gets one patch.
+
+**Why sequential, not parallel.**
+- Cost is about the same (±10%, same token volume).
+- Coherence is better: each section knows what came before, so there's less repetition and the bridges are real.
+- Polish has less to repair.
+- It's simpler: no thread pool, and a deterministic order.
+
+`write_section(..., prior_sections, ...)` is the seam: a parallel variant would pass `[]` for every section and map over a thread pool. Not built.
+
+**Grounding policy for host inferences.** The same text appears in the writer, patch and grounding prompts, and a unit test enforces it. Every number, name, date, quote and event must come from the section's sources. Hosts may connect stories and reason about implications when it's clearly framed as their own take ("my guess is…") and introduces no new fact. Without this, the grounder flags the connective tissue that makes a two-host dialogue worth listening to.
+
+**Word budget.** 135 wpm, from D-28's measurement. The frame (intro + outro) is `max(60, 12% of total)`. The total is only *warned* on outside ±20%, not failed: per-section budgets already bound it, and failing a whole paid stage over an 8% overshoot would be worse for the listener than a slightly long episode.
+
+**Deviations from the phase spec.**
+- (a) Story ids are renumbered `s1..sN` in outline order instead of copying the first source's `EpisodeItem.story_id`. After a rescript that merged sources, copying could give two sections the same id; renumbering can't, and `EpisodeItem.story_id` still equals the section's id for every source.
+- (b) The focus story. The spec said to take each article's highest-scoring `ArticleScore` row, but in the first real run the focus article's `focus` row tied (0.638) with its profile-topic row and lost the tie, so the intro didn't say "you asked about…". `resolve_topics` now makes the selected article with the best `focus` score the focus story, which is exactly the article rank.py puts in its focus slot. Found in run 1, fixed, then rescripted.
+- (c) `Script` also gets `trace: list[ScriptStep]` (step, section, words, flags, cost, latency, note), so the review export can show per-sub-step cost without new DB rows or a migration. It's never part of a model's output schema (polish returns `PolishedScript`).
+- (d) `metrics.fetch_rated_sessions` labels v2 episodes `sections-v<N>` (from `section_writer`). They have no `script_writer` key and would otherwise land in the dashboard's unknown bucket.
+- (e) `grounding.format_issues` now takes one section's claims and prints only turn indices, since a patch always sees one section.
+- (f) A scripting failure raises `ScriptingError` carrying the usage already spent, so the failed row still counts toward the daily cap (the D-56 mechanism).
+
+**`rescript <id> [--force]`** (CLI) re-runs only scripting on cached articles and stops before voicing. It accepts an episode paused after scripting or failed at scripting or later, and a ready one only with `--force` (the audio is cleared). It also deletes `data/chunks/<id>`, because `voice.py` skips chunks that already exist and would otherwise stitch the old script's audio into the new episode.
+
+**Measured in 3 real runs** (stop after scripting, no TTS; review files in `eval/scripts_v2/episode_<id>.md`):
+
+| episode | user / minutes | sections (sources) | words vs budget | flags initial → final | polish reverts | scripting $ / s | grounding $ / s |
+|---|---|---|---|---|---|---|---|
+| 15708 (after rescript) | AI, 6, focus | 5 (5) | 883 / 810 (+9%) | 5 → 0 | 0 | 0.175 / 131 | 0.005 / 37 |
+| 15709 | markets, 8 | 5 (7; 3 tennis merged) | 1160 / 1080 (+7%) | 7 → 2 | 3 | 0.216 / 144 | 0.008 / 387* |
+| 15710 | general, 4 | 2 (3; 2 F1 merged) | 621 / 540 (+15%) | 1 → 0 | 0 | 0.097 / 82 | 0.003 / 13 |
+
+- v1 cost $0.03–0.08 and took 27–74 s per episode. v2 costs about 2.5–3× more (still under $0.25) and takes about 1.5–2.5 min.
+- *One polish-grounding call in 15709 took 342 s. It was a `gpt-6-luna` call over the intro + outro against all 7 sources (about 84k characters). A single outlier, not reproduced.
+- Run 1's first pass, before the focus fix, is also in its review file's stage rows: $0.167, 117 s, flags 5 → 1, one revert.
+
+**Alternatives.**
+- Parallel sections: see above.
+- A polish that returns only the intro/outro. Rejected: the seams between stories are where v1 sounded most like a list, and letting polish touch them is safe because changed sections are re-grounded and reverted if flagged.
+- A separate `outlining` pipeline stage/status. Rejected: it needs a migration and a runner change for no user-visible benefit.
+
+**Consequences / what's left.**
+1. Every run lands 7–15% over budget: sections run about 10% over their targets. The next knob is aiming the writer about 5% under, or 130 wpm, but that should be checked against real TTS durations first.
+2. Polish reverted 3 of 5 sections in the markets episode, which throws away its seams there. A stricter polish prompt about bridge wording could help.
+3. Selection, not scripting:
+   - the markets episode had no central-bank story, so there was no rates ↔ AI-trading bridge to make;
+   - the general episode had no climate story;
+   - the Bundesliga article looks like an old story ("ten rounds left" in September), the D-28 stale-date problem that the recency work owns.
+4. Outlet names for concatenated domains read badly (`Techcompanynews`, `Mlwires`). The writer mostly used the article's own spelling, but an override list or Exa page metadata would fix it.
+5. **Concurrency hazard seen during the runs.** While the CLI was scripting episode 15710, another process running main's code marked it `interrupted`, resumed it with the v1 scripter and **voiced it for real ($0.35)**. That was almost certainly a running API server's startup recovery after a `--reload` restart (D-38). It also flipped 15708/15709 from paused to `failed at voicing`, without audio. Episode 15710 is now `ready` with v1 audio but a v2 script in the DB. Startup recovery should not resume an episode that a live CLI process is working on. Out of scope here and not fixed. `rescript 15710 --force` makes it consistent for about $0.10.

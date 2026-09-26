@@ -385,6 +385,26 @@ def test_fetch_rated_sessions_rating_lookup_is_global_and_sessions_dedupe(db) ->
     assert rows[episode_c.id].rating_value is None
 
 
+def test_fetch_rated_sessions_labels_scripting_v2_episodes_by_section_writer(db) -> None:
+    user = _user(db, "v2listener@example.com")
+    day = datetime(2026, 3, 1, tzinfo=UTC)
+    v1 = _episode(db, user, created_at=day)
+    v2 = _episode(db, user, created_at=day)
+    v2.prompt_versions = {"outline": 1, "section_writer": 1, "polish": 1, "grounding_check": 2}
+    db.add_all(
+        [
+            Event(user_id=user.id, episode_id=e.id, type="play_started", created_at=day)
+            for e in (v1, v2)
+        ]
+    )
+    db.commit()
+
+    start, end = metrics._bounds(date(2026, 3, 1), date(2026, 3, 1))
+    rows = {r.episode_id: r for r in metrics.fetch_rated_sessions(db, start, end, True)}
+    assert rows[v1.id].script_prompt_version == "1"
+    assert rows[v2.id].script_prompt_version == "sections-v1"
+
+
 def test_build_metrics_end_to_end_matches_manual_spot_check(db) -> None:
     day = datetime(2026, 2, 1, tzinfo=UTC)
     user = _user(db, "spotcheck@example.com")

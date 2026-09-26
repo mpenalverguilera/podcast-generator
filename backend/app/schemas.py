@@ -66,10 +66,73 @@ class Section(BaseModel):
     turns: list[Turn]
 
 
+class OutlineSection(BaseModel):
+    """One planned story section (scripting v2, docs/DECISIONS.md D-59). The
+    outline call writes these; code then overwrites story_id to match the
+    episode_items rows, so the model's own story_id only needs to be unique."""
+
+    story_id: str
+    source_ids: list[str]
+    topic_label: str
+    headline: str
+    angle: str
+    why_listener_cares: str
+    depth: Literal["headlines", "deep"]
+    target_words: int
+    key_facts: list[str]
+    must_not_cover: list[str]
+    bridge_in: str | None = None
+
+
+class DroppedSource(BaseModel):
+    source_id: str
+    reason: str
+
+
+class Outline(BaseModel):
+    cold_open_hook: str
+    sections: list[OutlineSection]
+    dropped: list[DroppedSource] = Field(default_factory=list)
+
+
+class SectionDraft(BaseModel):
+    """Model output for the section_writer and section_patch calls: only the
+    turns. kind/story_id/source_ids come from the outline, set by code."""
+
+    turns: list[Turn]
+
+
+class PolishedScript(BaseModel):
+    """Model output for the polish call. Not Script, so the model is never
+    asked to produce the outline or trace fields."""
+
+    title: str
+    summary: str
+    sections: list[Section]
+
+
+class ScriptStep(BaseModel):
+    """One sub-call inside the scripting stage (outline, a section write, a
+    grounding check, a patch, polish...), kept on the Script so the review
+    export can show cost and latency per sub-step without extra DB rows.
+    `section` is the index in the final script (intro 0, story k is k)."""
+
+    step: str
+    section: int | None = None
+    words: int | None = None
+    flags: int | None = None
+    cost_usd: float = 0.0
+    latency_ms: int = 0
+    note: str | None = None
+
+
 class Script(BaseModel):
     title: str
     summary: str
     sections: list[Section]
+    # None/empty for v1 episodes already in the DB, which must still load.
+    outline: Outline | None = None
+    trace: list[ScriptStep] = Field(default_factory=list)
 
 
 class UnsupportedClaim(BaseModel):

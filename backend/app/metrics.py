@@ -436,7 +436,10 @@ def fetch_rated_sessions(
                 ORDER BY ev.user_id, ev.episode_id, ev.id DESC
             )
             SELECT s.user_id, s.episode_id,
-                   e.prompt_versions ->> 'script_writer' AS version,
+                   -- Scripting v2 episodes (D-59) have no script_writer
+                   -- prompt; label them by their section_writer version.
+                   COALESCE('sections-v' || (e.prompt_versions ->> 'section_writer'),
+                            e.prompt_versions ->> 'script_writer') AS version,
                    CASE WHEN lr.value IN (1, -1) THEN lr.value ELSE NULL END AS rating_value
             FROM sessions s
             JOIN episodes e ON e.id = s.episode_id
