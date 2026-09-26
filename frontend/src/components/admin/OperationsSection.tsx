@@ -2,7 +2,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import type { OperationsMetrics } from '../../api/types'
 import { statusLabel } from '../StatusBadge'
 import { formatShortDay } from '../../lib/dates'
-import { formatCurrency, formatPercent } from '../../lib/format'
+import { formatCompact, formatCurrency, formatPercent } from '../../lib/format'
 import { CHART_AXIS, CHART_GRID, SERIES, STATUS_CRITICAL, orderProviders, providerColor, providerLabel } from '../../lib/chartPalette'
 import { ChartCard, EmptyChart } from './ChartCard'
 import { ChartTooltip } from './ChartTooltip'
@@ -10,24 +10,36 @@ import { StatTile } from './StatTile'
 
 const AXIS_PROPS = { stroke: CHART_AXIS, fontSize: 11, tickLine: false, axisLine: false }
 
+// pipeline_steps.stage values: statusLabel covers every episode status
+// (which is most of them, by design) except "grounding" -- the script
+// stage's own extra row (D-30), never an episode status.
+function stageLabel(stage: string): string {
+  return stage === 'grounding' ? 'Grounding check' : statusLabel(stage)
+}
+
 function StageLatencyChart({ operations, synthetic }: { operations: OperationsMetrics; synthetic: boolean }) {
   return (
-    <ChartCard title="Generation time by stage" hint="p50 / p95 latency, successful steps only" synthetic={synthetic}>
+    <ChartCard
+      title="Generation time (ms) by stage"
+      hint="p50 / p95 latency, successful steps only"
+      synthetic={synthetic}
+      wide
+    >
       {operations.stage_latency.length === 0 ? (
         <EmptyChart />
       ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={operations.stage_latency} margin={{ left: -20 }}>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={operations.stage_latency} margin={{ left: -10 }}>
             <CartesianGrid vertical={false} stroke={CHART_GRID} />
-            <XAxis dataKey="stage" tickFormatter={statusLabel} {...AXIS_PROPS} />
-            <YAxis allowDecimals={false} {...AXIS_PROPS} />
+            <XAxis dataKey="stage" tickFormatter={stageLabel} interval={0} {...AXIS_PROPS} />
+            <YAxis allowDecimals={false} tickFormatter={formatCompact} {...AXIS_PROPS} />
             <Tooltip
               content={<ChartTooltip formatValue={(v) => `${Math.round(Number(v)).toLocaleString()} ms`} />}
-              labelFormatter={(label) => statusLabel(String(label))}
+              labelFormatter={(label) => stageLabel(String(label))}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="p50_ms" name="p50" fill={SERIES.blue} maxBarSize={20} />
-            <Bar dataKey="p95_ms" name="p95" fill={SERIES.orange} radius={[4, 4, 0, 0]} maxBarSize={20} />
+            <Bar dataKey="p50_ms" name="p50" fill={SERIES.blue} maxBarSize={32} />
+            <Bar dataKey="p95_ms" name="p95" fill={SERIES.orange} radius={[4, 4, 0, 0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
       )}
@@ -37,20 +49,20 @@ function StageLatencyChart({ operations, synthetic }: { operations: OperationsMe
 
 function StageFailureChart({ operations, synthetic }: { operations: OperationsMetrics; synthetic: boolean }) {
   return (
-    <ChartCard title="Failure rate by stage" hint="Share of steps that failed" synthetic={synthetic}>
+    <ChartCard title="Failure rate by stage" hint="Share of steps that failed" synthetic={synthetic} wide>
       {operations.stage_failure_rate.length === 0 ? (
         <EmptyChart />
       ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={operations.stage_failure_rate} margin={{ left: -20 }}>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={operations.stage_failure_rate} margin={{ left: -10 }}>
             <CartesianGrid vertical={false} stroke={CHART_GRID} />
-            <XAxis dataKey="stage" tickFormatter={statusLabel} {...AXIS_PROPS} />
+            <XAxis dataKey="stage" tickFormatter={stageLabel} interval={0} {...AXIS_PROPS} />
             <YAxis tickFormatter={(v: number) => `${Math.round(v * 100)}%`} {...AXIS_PROPS} />
             <Tooltip
               content={<ChartTooltip formatValue={(v) => formatPercent(Number(v), 1)} />}
-              labelFormatter={(label) => statusLabel(String(label))}
+              labelFormatter={(label) => stageLabel(String(label))}
             />
-            <Bar dataKey="failure_rate" name="Failure rate" fill={STATUS_CRITICAL} radius={[4, 4, 0, 0]} maxBarSize={24} />
+            <Bar dataKey="failure_rate" name="Failure rate" fill={STATUS_CRITICAL} radius={[4, 4, 0, 0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
       )}

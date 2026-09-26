@@ -45,7 +45,7 @@ def test_listen_through_rate_and_avg_percent_listened() -> None:
         PlayEvent(2, 11, "play_progress", 25.0, 100.0),
     ]
     assert metrics.listen_through_rate(events) == 0.5
-    assert metrics.avg_percent_listened(events) == (100.0 + 25.0) / 2
+    assert metrics.avg_percent_listened(events) == (1.0 + 0.25) / 2
 
 
 def test_listen_through_rate_is_none_with_no_plays() -> None:

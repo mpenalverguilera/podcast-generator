@@ -358,13 +358,19 @@ def listen_through_rate(play_events: list[PlayEvent]) -> float | None:
 
 
 def avg_percent_listened(play_events: list[PlayEvent]) -> float | None:
-    percents = []
+    """Average fraction (0-1) of an episode's duration listened to, same
+    0-1 scale as every other ratio metric here (listen_through_rate,
+    rating_ratio, retention_rate, failure_rate) so the one shared frontend
+    formatPercent() -- which multiplies by 100 -- works uniformly. Returning
+    a pre-multiplied 0-100 value here was D-52's bug: the dashboard showed
+    "7119%" (see D-54)."""
+    fractions = []
     for s in _listen_sessions(play_events).values():
         if not s["duration_s"]:
             continue
         position = s["duration_s"] if s["completed"] else s["position_s"]
-        percents.append(min(100.0, 100.0 * position / s["duration_s"]))
-    return sum(percents) / len(percents) if percents else None
+        fractions.append(min(1.0, position / s["duration_s"]))
+    return sum(fractions) / len(fractions) if fractions else None
 
 
 def total_listened_minutes(play_events: list[PlayEvent]) -> float:
