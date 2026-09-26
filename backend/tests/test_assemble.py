@@ -1,4 +1,12 @@
+from pathlib import Path
+
+import pytest
+
+from app.adapters.tts.fake import _silent_wav
+from app.config import get_settings
+from app.pipeline import assemble
 from app.pipeline.assemble import _load_chunk
+from tests.conftest import make_user_with_episode
 
 
 def test_load_chunk_decodes_headerless_pcm_as_mono_16bit_44100(tmp_path) -> None:
@@ -15,3 +23,27 @@ def test_load_chunk_decodes_headerless_pcm_as_mono_16bit_44100(tmp_path) -> None
     assert len(segment) == 1000  # pydub reports length in milliseconds
     assert segment.channels == 1
     assert segment.frame_rate == 44100
+
+
+@pytest.mark.real_ffmpeg
+def test_run_applies_the_real_loudnorm_filter(db) -> None:
+    """The rest of the suite runs assemble.run with loudnorm swapped for a
+    no-op (tests/conftest.py's _fast_test_isolation, for speed); this test
+    opts out via the `real_ffmpeg` marker so the production ffmpeg command
+    (loudnorm + libmp3lame) is exercised end to end at least once.
+
+    5s of digital silence, not something shorter: libmp3lame's psymodel
+    asserts on a too-short loudnorm'd silent clip (observed empirically --
+    it fails below ~3s, "Assertion failed: el >= 0 ... psymodel.c"), so this
+    keeps a margin above that cliff while staying fast (~0.1s to encode)."""
+    episode = make_user_with_episode(db)
+    chunk_dir = Path(get_settings().data_dir) / "chunks" / str(episode.id)
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    (chunk_dir / "0.wav").write_bytes(_silent_wav(5.0))
+
+    usage = assemble.run(episode, adapters=None, db=db)  # type: ignore[arg-type]
+
+    assert Path(episode.audio_path).exists()
+    assert episode.duration_s is not None and episode.duration_s > 0
+    assert usage.provider == "local"
+    assert usage.cost_usd == 0.0

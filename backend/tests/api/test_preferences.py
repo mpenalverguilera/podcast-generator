@@ -2,7 +2,6 @@ from datetime import datetime
 
 from sqlalchemy import select
 
-from app.config import get_settings
 from app.models import Event
 from app.voices import CURATED_VOICES
 from tests.api.conftest import auth_headers, client, login, make_user
@@ -183,8 +182,9 @@ def test_length_options(db) -> None:
     assert all(n >= 1 for n in stories) and stories == sorted(stories)
 
 
-def test_voice_preview_needs_the_media_token(db, tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+def test_voice_preview_needs_the_media_token(db, tmp_path) -> None:
+    # data_dir is already this test's tmp_path via the autouse _fast_test_isolation
+    # fixture in tests/conftest.py.
     voice = CURATED_VOICES[0]
     (tmp_path / "voice_previews").mkdir()
     (tmp_path / "voice_previews" / f"{voice.id}.mp3").write_bytes(b"ID3fake")
