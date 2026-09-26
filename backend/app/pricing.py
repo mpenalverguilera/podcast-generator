@@ -34,7 +34,7 @@ def cost_for(
 
     if provider == "vercel_gateway":
         # Vercel AI Gateway's /v1/evaluate (Jev) returns its own exact marketCost per call --
-        # pass it through, same pattern as Exa's costDollars (D-40). Not `cost`, which reads 0
+        # pass it through, same pattern as Exa's costDollars (D-43). Not `cost`, which reads 0
         # while the account is still on free evaluation credits.
         if market_cost_usd is None:
             raise ValueError("vercel_gateway cost requires market_cost_usd")

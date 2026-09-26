@@ -15,7 +15,7 @@ def get_classifier(settings: Settings | None = None, override: str | None = None
     if provider == "openai":
         return LLMClassifier(get_llm(settings), settings)
     if provider == "jev":
-        # D-41/D-42: Jev retries transient errors itself, then falls back to the OpenAI classifier
+        # D-44/D-45: Jev retries transient errors itself, then falls back to the OpenAI classifier
         # (MODEL_CLASSIFIER) per article on
         # any remaining error, so a Jev outage degrades one candidate's score, not the whole
         # ranking stage.

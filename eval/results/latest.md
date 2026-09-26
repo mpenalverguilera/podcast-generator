@@ -14,7 +14,7 @@ Oracle selection precision (best possible on this label set): 1.00
 
 Selection agreement (Jaccard vs Luna, target_minutes=10 -> 8 stories): luna_rerun=0.60, sol=0.33, jev=0.60, jev_v1=0.14
 
-`jev` = jev.v2 (graded score questions, D-42), the decision candidate. `jev_v1` = the phase-04 choice/boolean questions (D-40), frozen scores shown for comparison only.
+`jev` = jev.v2 (graded score questions, D-45), the decision candidate. `jev_v1` = the phase-04 choice/boolean questions (D-43), frozen scores shown for comparison only.
 
 Relevance scores exactly 0 or 1: luna=32%, luna_rerun=32%, sol=32%, jev=7%, jev_v1=80%
 

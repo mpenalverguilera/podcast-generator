@@ -50,7 +50,7 @@ docker compose up --build                      # everything
 ## Rules
 
 **Secrets**
-- Keys come only from environment via `app/config.py` (pydantic-settings reading `.env`): `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `EXA_API_KEY`, `AI_GATEWAY_API_KEY` (Jev, via Vercel AI Gateway — see D-40/D-42; free evaluation credits need a card on file with Vercel). Needed only when `CLASSIFIER_PROVIDER=jev`; Jev then retries transient errors and falls back per article to the OpenAI classifier, `MODEL_CLASSIFIER` (`FallbackClassifier`).
+- Keys come only from environment via `app/config.py` (pydantic-settings reading `.env`): `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `EXA_API_KEY`, `AI_GATEWAY_API_KEY` (Jev, via Vercel AI Gateway — see D-43/D-45; free evaluation credits need a card on file with Vercel). Needed only when `CLASSIFIER_PROVIDER=jev`; Jev then retries transient errors and falls back per article to the OpenAI classifier, `MODEL_CLASSIFIER` (`FallbackClassifier`).
 - `.env` is gitignored; `.env.example` lists every variable with a placeholder. Never print, log, or commit a key. Never put a key in frontend code.
 
 **Environment setup**

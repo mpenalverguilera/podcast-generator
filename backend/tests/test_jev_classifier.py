@@ -12,7 +12,7 @@ from app.config import Settings
 from app.models import Article
 from app.schemas import InterestProfile, Topic
 
-# A /v1/evaluate response in the `score`-question shape jev.v2 asks for (docs/DECISIONS.md D-42):
+# A /v1/evaluate response in the `score`-question shape jev.v2 asks for (docs/DECISIONS.md D-45):
 # the envelope (usage, providerMetadata) is a real captured response, the `answers` block is written
 # from Vercel's documented `score` answer shape (score + per-rung probabilities). No secrets in it.
 FIXTURE = json.loads(
@@ -197,7 +197,7 @@ def test_missing_key_raises() -> None:
 
 
 def test_factory_returns_jev_wrapped_in_fallback() -> None:
-    """D-41: classifier_provider="jev" returns Jev wrapped in a per-article fallback to Luna,
+    """D-44: classifier_provider="jev" returns Jev wrapped in a per-article fallback to Luna,
     not a bare JevClassifier -- so a Jev outage degrades one candidate's score, not the stage."""
     settings = Settings(classifier_provider="jev", ai_gateway_api_key="agw-test")
     classifier = get_classifier(settings)

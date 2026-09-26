@@ -1,8 +1,8 @@
-"""Smoke test: Jev via Vercel AI Gateway (docs/DECISIONS.md D-40).
+"""Smoke test: Jev via Vercel AI Gateway (docs/DECISIONS.md D-43).
 
 Confirms:
 - AI_GATEWAY_API_KEY loads from .env and authenticates against https://ai-gateway.vercel.sh
-- the production JevClassifier (jev.v2, D-42) posts to /v1/evaluate and parses its graded
+- the production JevClassifier (jev.v2, D-45) posts to /v1/evaluate and parses its graded
   relevance/newsworthy `score` answers and already_covered `boolean`, exact token usage and AI
   Gateway's marketCost correctly -- expect high relevance for the launch article, low relevance and
   newsworthiness for the listicle, and values in between rather than only 0 or 1

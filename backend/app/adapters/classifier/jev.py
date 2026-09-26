@@ -17,21 +17,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Jev (TypeSafe) is only reachable through Vercel's AI Gateway, not TypeSafe's own API -- see
-# docs/DECISIONS.md D-40 and https://vercel.com/docs/ai-gateway/modalities/evaluation for the
+# docs/DECISIONS.md D-43 and https://vercel.com/docs/ai-gateway/modalities/evaluation for the
 # request/response shape.
 _BASE_URL = "https://ai-gateway.vercel.sh"
 _EVALUATE_PATH = "/v1/evaluate"
 
 # Jev takes typed questions, not a rendered text prompt, so its "prompt" lives here rather than in
-# app/prompts/*.vN.md (D-39). Bump this whenever the questions or state below change: the eval
+# app/prompts/*.vN.md (D-42). Bump this whenever the questions or state below change: the eval
 # notebook tags every cached score with it, so a change re-scores instead of reusing stale rows.
-# v1 (D-40): relevance as a topic-vs-"none" `choice`, newsworthy as a `boolean`.
-# v2 (D-42): both as graded `score` questions about the single topic being scored.
+# v1 (D-43): relevance as a topic-vs-"none" `choice`, newsworthy as a `boolean`.
+# v2 (D-45): both as graded `score` questions about the single topic being scored.
 JEV_PROMPT_VERSION = "jev.v2"
 
 # `score` criteria are ordered lowest -> highest; Jev returns an interpolated `score` in
 # [0, len - 1], normalized to 0-1 below. Definitions follow classifier.v1.md (what Luna/Sol get)
-# and the D-41 label rules.
+# and the D-44 label rules.
 _RELEVANCE_RUNGS = [
     "off-topic: not about this topic at all, on the listener's avoid list, or an index, listing "
     "or home page rather than an article",
@@ -53,8 +53,8 @@ _ALREADY_COVERED_CRITERIA = {
     "false": "A new story, or a meaningfully different angle on an old one.",
 }
 
-# Two different failures, handled differently (D-42):
-# - 502/503/504: random and brief (~2% of calls, the next one almost always succeeds, D-41 point
+# Two different failures, handled differently (D-45):
+# - 502/503/504: random and brief (~2% of calls, the next one almost always succeeds, D-44 point
 #   6). Retried a few times with a short backoff.
 # - 429: a rate limit (Vercel's free tier limits each model per account, and the gateway rejects
 #   before trying any host). Retrying quickly keeps the account over the limit, so a 429 pauses
@@ -168,10 +168,10 @@ def _normalized(answer: dict, rung_count: int) -> float:
 
 class JevClassifier:
     """Real Classifier backed by TypeSafe's Jev, served through Vercel AI Gateway's evaluation
-    API (D-40). One POST per (article, topic) with two graded `score` questions (relevance to the
-    single topic being scored, newsworthiness) and a `boolean` for already_covered (D-42).
+    API (D-43). One POST per (article, topic) with two graded `score` questions (relevance to the
+    single topic being scored, newsworthiness) and a `boolean` for already_covered (D-45).
 
-    Failures (D-42): 502/503/504 and transport errors are retried up to `jev_max_attempts` times
+    Failures (D-45): 502/503/504 and transport errors are retried up to `jev_max_attempts` times
     with a short backoff; a 429 pauses Jev process-wide for `jev_rate_limit_cooldown_s` and
     raises JevRateLimited. Either way a short `retry-after` is honored first. Whatever still
     fails raises, which is when FallbackClassifier scores the article with the OpenAI

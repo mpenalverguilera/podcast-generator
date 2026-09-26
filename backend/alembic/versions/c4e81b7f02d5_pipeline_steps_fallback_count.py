@@ -1,9 +1,9 @@
 """pipeline_steps.fallback_count
 
 How many classifier calls in a stage fell back from Jev to Luna
-(FallbackClassifier). docs/DECISIONS.md D-41/D-42. A new revision rather than
+(FallbackClassifier). docs/DECISIONS.md D-44/D-45. A new revision rather than
 amending the initial schema: a database already at head would silently skip
-an amended file (D-41's migration gotcha). `IF NOT EXISTS` because the dev DB
+an amended file (D-44's migration gotcha). `IF NOT EXISTS` because the dev DB
 already got this column by hand during the phase 04 eval.
 
 Revision ID: c4e81b7f02d5
