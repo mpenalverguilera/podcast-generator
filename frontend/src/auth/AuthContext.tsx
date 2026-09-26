@@ -8,6 +8,7 @@ interface AuthContextValue {
   user: MeResponse | null
   isLoading: boolean
   login: (email: string, password: string) => Promise<MeResponse>
+  signup: (email: string, password: string) => Promise<MeResponse>
   logout: () => void
 }
 
@@ -31,14 +32,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [queryClient])
 
-  const login = useCallback(
-    async (email: string, password: string) => {
-      const { access_token } = await api.login(email, password)
+  const signIn = useCallback(
+    (access_token: string) => {
       setToken(access_token)
       setTokenState(access_token)
       return queryClient.fetchQuery({ queryKey: ['me'], queryFn: api.me })
     },
     [queryClient],
+  )
+
+  const login = useCallback(
+    async (email: string, password: string) => signIn((await api.login(email, password)).access_token),
+    [signIn],
+  )
+
+  // The signup endpoint returns a token, so a new account is signed in at once.
+  const signup = useCallback(
+    async (email: string, password: string) => signIn((await api.signup(email, password)).access_token),
+    [signIn],
   )
 
   const logout = useCallback(() => {
@@ -52,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: meQuery.data ?? null,
     isLoading: token !== null && meQuery.isLoading,
     login,
+    signup,
     logout,
   }
 

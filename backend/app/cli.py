@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 
 import typer
-from passlib.context import CryptContext
 from sqlalchemy import func, select
 
 from app.adapters.llm import get_llm
@@ -26,9 +25,9 @@ from app.pipeline.profile import extract_profile
 from app.pipeline.runner import run_episode
 from app.pipeline.script import strip_audio_tags
 from app.schemas import Script
+from app.users import create_user
 
 cli = typer.Typer(help="Personal Podcast Generator pipeline CLI")
-_pwd_context = CryptContext(schemes=["bcrypt"])
 logger = logging.getLogger(__name__)
 
 
@@ -51,25 +50,7 @@ def _create_user_if_missing(
         return
 
     logger.info("creating user %s (admin=%s, synthetic=%s)", email, is_admin, is_synthetic)
-    settings = get_settings()
-    user = User(
-        email=email,
-        password_hash=_pwd_context.hash(password),
-        is_admin=is_admin,
-        is_synthetic=is_synthetic,
-    )
-    db.add(user)
-    db.flush()
-    db.add(
-        Preferences(
-            user_id=user.id,
-            interest_profile={"topics": [], "avoid": []},
-            target_minutes=6,
-            host_a={"name": "Alex", "voice_id": settings.default_voice_host_a},
-            host_b={"name": "Sam", "voice_id": settings.default_voice_host_b},
-            timezone="UTC",
-        )
-    )
+    user = create_user(db, email, password, is_admin=is_admin, is_synthetic=is_synthetic)
     typer.echo(f"created user {email} (id={user.id}, admin={is_admin})")
 
 

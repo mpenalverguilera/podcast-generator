@@ -2,6 +2,7 @@
 Kept separate from app/schemas.py, which is the pipeline's own internal value
 types (Script, Usage, ...) -- these are the HTTP contract, not pipeline data."""
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -13,12 +14,42 @@ from app.voices import CURATED_VOICES
 CURATED_VOICE_IDS = {v.id for v in CURATED_VOICES}
 
 
+# Deliberately loose: "something@something.tld", the same check the frontend
+# makes. Real deliverability would need a verification email (D-47).
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _normalize_email(value: str) -> str:
+    # Stored and looked up lowercased, so signing up as Foo@X.com and logging
+    # in as foo@x.com is the same account, and two casings can't both register.
+    return value.strip().lower()
+
+
 class LoginRequest(BaseModel):
     # Plain str, not pydantic's EmailStr: EmailStr needs the optional
     # email-validator dependency for a check login() already does for real
-    # (a lookup against seeded users, which rejects any non-matching email).
+    # (a lookup against existing users, which rejects any non-matching email).
     email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def _normalize(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class SignupRequest(BaseModel):
+    email: str
+    # 72 is bcrypt's input limit; longer passwords would be silently truncated.
+    password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, value: str) -> str:
+        value = _normalize_email(value)
+        if not _EMAIL_RE.match(value):
+            raise ValueError("enter a valid email address")
+        return value
 
 
 class TokenResponse(BaseModel):

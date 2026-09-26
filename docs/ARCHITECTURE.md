@@ -222,6 +222,7 @@ events           id, user_id, episode_id, type, payload JSONB, is_synthetic, cre
 
 ```
 POST /auth/login                          → JWT
+POST /auth/signup                         → JWT (201; 409 if the email is taken, D-47)
 GET  /me
 GET  /profile/questions                   the guided interview questions
 POST /profile/extract                     free-text answers → proposed profile (not saved)

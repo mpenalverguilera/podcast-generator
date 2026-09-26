@@ -4,6 +4,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { RequireAdmin, RequireAuth } from './auth/RequireAuth'
 import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
+import { SignupPage } from './pages/SignupPage'
 import { EpisodesPage } from './pages/EpisodesPage'
 import { EpisodeDetailPage } from './pages/EpisodeDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -20,6 +21,7 @@ function App() {
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
             <Route
               path="/"
               element={

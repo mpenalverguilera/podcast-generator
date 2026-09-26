@@ -1,6 +1,6 @@
 """JWT auth for the API (docs/phases/05-api-scheduler.md step 1). Password
-hashing reuses the same passlib CryptContext the CLI's seed-users command
-already uses (app/cli.py), so a seeded user's hash verifies here unchanged."""
+hashing lives here only: app/users.create_user (used by both the CLI's
+seed-users and POST /auth/signup) hashes with hash_password below."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -20,6 +20,10 @@ MEDIA_TOKEN_EXPIRES_HOURS = 1
 
 pwd_context = CryptContext(schemes=["bcrypt"])
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def hash_password(plain_password: str) -> str:
+    return pwd_context.hash(plain_password)
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
