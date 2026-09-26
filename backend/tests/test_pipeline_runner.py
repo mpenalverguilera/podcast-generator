@@ -1,5 +1,6 @@
 import logging
 
+import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
@@ -41,15 +42,23 @@ def test_happy_path_reaches_ready(db) -> None:
     assert episode.grounding_flags_final == []
 
 
-def test_resume_from_failed_stage(db, monkeypatch) -> None:
+def test_resume_from_failed_stage(db) -> None:
     episode = make_user_with_episode(db)
 
     def _boom(_episode, _adapters, _db):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(voice_stage, "run", _boom)
+    # A scoped MonkeyPatch, not the `monkeypatch` fixture: that fixture instance
+    # is shared with every other fixture in this test's dependency graph,
+    # including conftest.py's autouse _fast_test_isolation (data_dir, the
+    # no-op loudnorm filter) -- calling *its* .undo() mid-test to restore the
+    # real voice stage below would also silently revert those, sending the
+    # retry's audio into the real backend/data/ with the real (slow) filter.
+    # This context manager undoes only its own patch, on exit.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(voice_stage, "run", _boom)
+        result = run_episode(episode.id)
 
-    result = run_episode(episode.id)
     assert result.status == EpisodeStatus.FAILED
     assert result.failed_stage == "voicing"
     assert result.error == "boom"
@@ -68,10 +77,7 @@ def test_resume_from_failed_stage(db, monkeypatch) -> None:
     assert all(s.status == StepStatus.SUCCESS for s in steps[:-1])
     assert steps[-1].status == StepStatus.FAILED
 
-    # Undo the patch mid-test (not just at teardown) so the retry below uses
-    # the real voice stage.
-    monkeypatch.undo()
-
+    # The context manager above already restored the real voice stage.
     result2 = run_episode(episode.id)
     assert result2.status == EpisodeStatus.READY
 

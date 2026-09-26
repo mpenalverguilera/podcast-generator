@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.schemas import ContentResult, RawArticle, Usage
@@ -7,11 +7,29 @@ from app.schemas import ContentResult, RawArticle, Usage
 FIXTURES_DIR = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 
+def _rebase_published_dates(results: list[dict], now: datetime) -> dict[str, datetime]:
+    """Maps each fixture result's url to a published_at shifted so the newest
+    article lands 1 hour before `now`, preserving every article's original age
+    relative to the others. The fixture's captured dates are calendar-fixed
+    (2026-09-23/24); left as-is, rank.py's recency decay (3-day half-life)
+    ages every article out of selection within about a week of capture --
+    silently failing every fake-pipeline test with no code change on our
+    side. Rebasing keeps the fixture "fresh" no matter when the suite runs."""
+    parsed = {
+        r["url"]: datetime.fromisoformat(r["published_date"].replace("Z", "+00:00"))
+        for r in results
+    }
+    shift = (now - timedelta(hours=1)) - max(parsed.values())
+    return {url: dt + shift for url, dt in parsed.items()}
+
+
 class FakeSearchSource:
     """Deterministic SearchSource for tests/CLI iteration. Reuses the real Exa
     responses captured in phase 00 (backend/tests/fixtures/exa_search.json and
     exa_contents.json) rather than inventing new ones, so the shape matches a
-    real response exactly."""
+    real response exactly. `published_date`s are rebased relative to "now" at
+    construction time (see _rebase_published_dates) so the fixture never goes
+    stale."""
 
     provider = "fake"
 
@@ -19,6 +37,9 @@ class FakeSearchSource:
         self._fixtures_dir = fixtures_dir or FIXTURES_DIR
         self._search_fixture = json.loads((self._fixtures_dir / "exa_search.json").read_text())
         self._contents_fixture = json.loads((self._fixtures_dir / "exa_contents.json").read_text())
+        self._published_at = _rebase_published_dates(
+            self._search_fixture["results"], datetime.now(UTC)
+        )
 
     def search(self, query: str, since: datetime | None) -> tuple[list[RawArticle], Usage]:
         articles = [
@@ -26,7 +47,7 @@ class FakeSearchSource:
                 url=r["url"],
                 title=r["title"],
                 outlet=None,
-                published_at=r["published_date"],
+                published_at=self._published_at[r["url"]],
                 highlights=r["highlights"] or [],
             )
             for r in self._search_fixture["results"]
