@@ -84,6 +84,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+  signup: (email: string, password: string) =>
+    request<TokenResponse>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
   me: () => request<MeResponse>('/me'),
 
   profileQuestions: () => request<QuestionOut[]>('/profile/questions'),
