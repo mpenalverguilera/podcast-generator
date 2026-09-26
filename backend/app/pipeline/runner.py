@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,6 +10,8 @@ from app.config import get_settings
 from app.db import session_scope
 from app.models import Episode, EpisodeStatus, PipelineStep, StepStatus
 from app.pipeline import STAGE_ORDER
+from app.schemas import Usage
+from app.spend import daily_spend_usd
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +46,6 @@ def _start_index(episode: Episode) -> int:
             return 0
         return _stage_index(EpisodeStatus(episode.failed_stage))
     return _stage_index(episode.status)
-
-
-def _daily_spend_usd(db: Session, today: date) -> float:
-    """Real spend only: seeded dashboard rows (is_synthetic episodes, phase
-    07) never cost anything and must not trip the cap. D-51."""
-    total = db.scalar(
-        select(func.coalesce(func.sum(PipelineStep.cost_usd), 0))
-        .join(Episode, Episode.id == PipelineStep.episode_id)
-        .where(func.date(PipelineStep.started_at) == today, Episode.is_synthetic.is_(False))
-    )
-    return float(total or 0.0)
 
 
 FORCED_FAILURE = "forced failure (FAKE_FAIL_ONCE_AT)"
@@ -106,7 +97,7 @@ def run_episode(
             stage_name = stage_status.value
 
             today = datetime.now(UTC).date()
-            if _daily_spend_usd(db, today) >= settings.daily_spend_cap_usd:
+            if daily_spend_usd(db, today) >= settings.daily_spend_cap_usd:
                 episode.status = EpisodeStatus.FAILED
                 episode.failed_stage = stage_name
                 episode.error = "daily spend cap exceeded"
@@ -125,12 +116,21 @@ def run_episode(
                 usage = stage_module.run(episode, adapters, db)
             except Exception as exc:
                 latency_ms = int((time.monotonic() - stage_start) * 1000)
+                # A stage that paid for some calls before failing (voicing's
+                # finished chunks) attaches that usage, so the spend is recorded
+                # and counts toward the daily cap. D-56.
+                partial: Usage | None = getattr(exc, "usage", None)
                 db.add(
                     PipelineStep(
                         episode_id=episode.id,
                         stage=stage_name,
                         status=StepStatus.FAILED,
-                        provider="unknown",
+                        provider=partial.provider if partial else "unknown",
+                        model=partial.model if partial else None,
+                        units_in=partial.units_in if partial else None,
+                        cost_usd=partial.cost_usd if partial else None,
+                        cost_is_estimate=partial.cost_is_estimate if partial else False,
+                        usage_source=partial.usage_source if partial else None,
                         latency_ms=latency_ms,
                         started_at=started_at,
                         finished_at=datetime.now(UTC),

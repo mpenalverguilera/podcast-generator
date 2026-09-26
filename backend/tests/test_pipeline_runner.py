@@ -8,7 +8,9 @@ from app.config import get_settings
 from app.models import Episode, EpisodeStatus, EpisodeTrigger, PipelineStep, StepStatus
 from app.pipeline import STAGE_ORDER
 from app.pipeline import voice as voice_stage
-from app.pipeline.runner import _daily_spend_usd, _should_force_failure, run_episode
+from app.pipeline.runner import _should_force_failure, run_episode
+from app.schemas import Usage
+from app.spend import daily_spend_usd
 from tests.conftest import make_user_with_episode
 
 
@@ -204,4 +206,32 @@ def test_daily_spend_ignores_synthetic_episodes(db) -> None:
         )
     db.commit()
 
-    assert _daily_spend_usd(db, datetime.now(UTC).date()) == 0.25
+    assert daily_spend_usd(db, datetime.now(UTC).date()) == 0.25
+
+
+def test_failed_stage_records_partial_usage_toward_daily_spend(db, monkeypatch) -> None:
+    """Chunks that finished before a sibling failed were paid for; the FAILED
+    row must carry that cost so the daily cap sees it (D-56)."""
+    episode = make_user_with_episode(db)
+    partial = Usage(
+        provider="elevenlabs",
+        model="eleven_v3",
+        units_in=3000,
+        cost_usd=0.33,
+        cost_is_estimate=True,
+    )
+
+    def _partial_failure(_episode, _adapters, _db):
+        raise voice_stage.VoiceStageError("1 of 3 chunks failed", partial)
+
+    monkeypatch.setattr(voice_stage, "run", _partial_failure)
+    run_episode(episode.id)
+
+    failed = _steps_for(db, episode.id)[-1]
+    assert (failed.stage, failed.status, failed.provider) == (
+        "voicing",
+        StepStatus.FAILED,
+        "elevenlabs",
+    )
+    assert (failed.units_in, float(failed.cost_usd), failed.cost_is_estimate) == (3000, 0.33, True)
+    assert daily_spend_usd(db, datetime.now(UTC).date()) == pytest.approx(0.33)

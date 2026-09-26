@@ -100,3 +100,9 @@ provider's own billed number rather than estimating it — use it:
 - Phase 00 could not read the account's character quota: `client.user.subscription.get()` (`GET /v1/user/subscription`) 401s on this key ("missing the permission user_read"). No total-quota number is available for this test account.
 - What *is* available: every call's own `character-cost` response header (see Adapter contract). Summing that column on `pipeline_steps` gives a running "characters used so far" total for this project — not the account's total quota, but the number that actually matters for `MAX_TTS_CHARS_PER_EPISODE`/`DAILY_SPEND_CAP_USD` enforcement.
 - Never exceed `MAX_TTS_CHARS_PER_EPISODE`. Iterate with `--minutes 1` or `--tts fake`; save full-length runs for final takes.
+
+## Concurrency and retries (D-56)
+- ElevenLabs limits *concurrent requests* per plan (Free 2, Starter 3, Creator 5, Pro 10, Scale/Business 15), not requests per minute; over the limit is a 429 `too_many_concurrent_requests`. This key accepted 4 in flight, so it's Creator or above. `maximum-concurrent-requests` is **not** returned on `text-to-dialogue` with this key; only `current-concurrent-requests` is.
+- The voice stage synthesizes missing chunks in a thread pool; the adapter holds a **process-wide** semaphore of `ELEVENLABS_MAX_CONCURRENCY` (default 4) around each request, so concurrent episodes can't burst past the account limit together.
+- The SDK does **not** retry `text_to_dialogue` (it streams, and the SDK's `stream()` path has no retry loop), so the adapter retries 429/5xx/connect errors itself (`ELEVENLABS_MAX_ATTEMPTS`, backoff with jitter, honors `retry-after`). Don't retry 401/422 or read timeouts.
+- Before sending a batch, the voice stage checks today's spend plus the batch's estimated cost fits `DAILY_SPEND_CAP_USD`.

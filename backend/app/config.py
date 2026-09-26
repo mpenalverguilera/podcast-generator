@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     default_voice_host_a: str = ""
     default_voice_host_b: str = ""
     elevenlabs_usd_per_1k_chars: float = 0.11
+    # ElevenLabs limits concurrent requests per plan (Free 2, Starter 3, Creator 5, Pro 10);
+    # over it is a 429. Process-wide cap on chunk requests in flight, across all episodes.
+    # This key accepted 4 at once with no 429 (so Creator or above); 4 leaves headroom (D-56).
+    elevenlabs_max_concurrency: int = 4
+    # Per chunk. 429s and 5xx are retried with backoff; other errors fail at once.
+    elevenlabs_max_attempts: int = 3
 
     # Guardrails
     max_tts_chars_per_episode: int = 12000

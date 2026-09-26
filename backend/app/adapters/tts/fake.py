@@ -32,6 +32,8 @@ class FakeTTS:
     """Deterministic TTS for tests/CLI iteration: returns silence sized to the
     text length (roughly 15 characters/second of speech), zero cost."""
 
+    provider = "fake"
+
     def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]:
         total_chars = sum(len(t.text) for t in turns)
         duration_s = total_chars / _CHARS_PER_SECOND
