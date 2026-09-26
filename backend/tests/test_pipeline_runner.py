@@ -1,13 +1,14 @@
 import logging
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.models import EpisodeStatus, PipelineStep, StepStatus
+from app.models import Episode, EpisodeStatus, EpisodeTrigger, PipelineStep, StepStatus
 from app.pipeline import STAGE_ORDER
 from app.pipeline import voice as voice_stage
-from app.pipeline.runner import _should_force_failure, run_episode
+from app.pipeline.runner import _daily_spend_usd, _should_force_failure, run_episode
 from tests.conftest import make_user_with_episode
 
 
@@ -176,3 +177,31 @@ def test_fake_fail_once_at_is_ignored_with_real_tts(db, monkeypatch) -> None:
     assert _should_force_failure(db, episode.id, "ranking", "fake") is True
     assert _should_force_failure(db, episode.id, "ranking", "elevenlabs") is False
     assert _should_force_failure(db, episode.id, "voicing", "fake") is False
+
+
+def test_daily_spend_ignores_synthetic_episodes(db) -> None:
+    real = make_user_with_episode(db)
+    seeded = Episode(
+        user_id=real.user_id,
+        status=EpisodeStatus.READY,
+        trigger=EpisodeTrigger.SCHEDULE,
+        window_start=datetime.now(UTC),
+        target_minutes=6,
+        is_synthetic=True,
+    )
+    db.add(seeded)
+    db.flush()
+    for episode_id, cost in ((real.id, 0.25), (seeded.id, 100.0)):
+        db.add(
+            PipelineStep(
+                episode_id=episode_id,
+                stage="voicing",
+                status=StepStatus.SUCCESS,
+                provider="elevenlabs",
+                cost_usd=cost,
+                started_at=datetime.now(UTC),
+            )
+        )
+    db.commit()
+
+    assert _daily_spend_usd(db, datetime.now(UTC).date()) == 0.25

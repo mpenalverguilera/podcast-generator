@@ -141,3 +141,15 @@ def test_catch_up_anchors_on_schedule_change_when_never_run(db) -> None:
         catch_up_due(db, user.id, _DAILY_8AM, "UTC", now=_SUNDAY_8AM + timedelta(days=1, hours=1))
         is True
     )
+
+
+def test_run_scheduled_episode_skips_synthetic_users(db) -> None:
+    user = User(email="seed@synthetic.invalid", password_hash="x", is_synthetic=True)
+    db.add(user)
+    db.flush()
+    db.add(Preferences(user_id=user.id, target_minutes=6, schedule_cron="0 * * * *"))
+    db.commit()
+
+    run_scheduled_episode(user.id)
+
+    assert db.scalar(select(Episode).where(Episode.user_id == user.id)) is None

@@ -52,6 +52,12 @@ def run_scheduled_episode(user_id: int) -> None:
         if owner is None:
             logger.warning("scheduled job for missing user %s, skipping", user_id)
             return
+        if owner.is_synthetic:
+            # Seeded/eval users are mock accounts: a real run would spend
+            # real money on them. The seed never sets schedule_cron; this is
+            # the backstop. D-51.
+            logger.warning("scheduled job for synthetic user %s, skipping", user_id)
+            return
         try:
             episode = create_episode(
                 db, owner, focus=None, target_minutes=None, trigger=EpisodeTrigger.SCHEDULE
@@ -144,7 +150,7 @@ def start_scheduler() -> None:
         rows = db.execute(
             select(User.id, Preferences.schedule_cron, Preferences.timezone)
             .join(Preferences, Preferences.user_id == User.id)
-            .where(Preferences.schedule_cron.is_not(None))
+            .where(Preferences.schedule_cron.is_not(None), User.is_synthetic.is_(False))
         ).all()
         for user_id, schedule_cron, timezone in rows:
             run_now = catch_up_due(db, user_id, schedule_cron, timezone)

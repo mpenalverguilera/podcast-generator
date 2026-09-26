@@ -1,11 +1,17 @@
 import json
 import logging
+import random
+import secrets
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from sqlalchemy import func, select
 
+from app import seed_metrics
 from app.adapters.llm import get_llm
+from app.auth import hash_password
 from app.config import get_settings
 from app.db import session_scope
 from app.logging_setup import configure_logging
@@ -82,6 +88,42 @@ def seed_users() -> None:
             is_admin=False,
             is_synthetic=True,
         )
+
+
+@cli.command("seed-metrics")
+def seed_metrics_cmd(
+    days: int = typer.Option(60, "--days", help="Days of history, ending today 00:00 UTC"),
+    users: int = typer.Option(150, "--users", help="How many synthetic users"),
+    seed: int = typer.Option(7, "--seed", help="RNG seed; same seed + same day = same rows"),
+    reset: bool = typer.Option(False, "--reset", help="Only remove seeded rows, don't reseed"),
+) -> None:
+    """Seeds is_synthetic users, episodes, pipeline_steps and events for the
+    admin dashboard (phase 07, docs/DECISIONS.md D-51). Replaces any earlier
+    seed; never touches real rows or the phase-04 eval user."""
+    settings = get_settings()
+    started = time.monotonic()
+    with session_scope() as db:
+        removed = seed_metrics.delete_seeded(db)
+        typer.echo(f"removed {removed} previously seeded users (and their rows)")
+        if reset:
+            return
+        baselines = seed_metrics.load_baselines(db, settings)
+        end = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        # One hash of a thrown-away token for every seeded user: nobody can
+        # log in as them, and 150 bcrypt rounds would blow the 30s budget.
+        password_hash = hash_password(secrets.token_urlsafe(32))
+        dataset = seed_metrics.build_dataset(
+            random.Random(seed),
+            days=days,
+            users=users,
+            end=end,
+            baselines=baselines,
+            settings=settings,
+            password_hash=password_hash,
+        )
+        counts = seed_metrics.write_dataset(db, dataset)
+    summary = ", ".join(f"{n} {name}" for name, n in counts.items())
+    typer.echo(f"seeded {summary} in {time.monotonic() - started:.1f}s")
 
 
 @cli.command("profile")
