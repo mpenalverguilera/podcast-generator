@@ -1,18 +1,26 @@
 {
   "model": "typesafe-ai/jev",
   "answers": {
-    "topic": {
-      "type": "choice",
-      "choice": "Space launches",
+    "relevance": {
+      "type": "score",
+      "score": 3.72,
       "probabilities": {
-        "Space launches": 1,
-        "none": 0
-      },
-      "confidence": 1
+        "0": 0,
+        "1": 0,
+        "2": 0.02,
+        "3": 0.24,
+        "4": 0.74
+      }
     },
     "newsworthy": {
-      "type": "boolean",
-      "probability": 0.44
+      "type": "score",
+      "score": 2.61,
+      "probabilities": {
+        "0": 0.01,
+        "1": 0.04,
+        "2": 0.28,
+        "3": 0.67
+      }
     },
     "already_covered": {
       "type": "boolean",
@@ -24,11 +32,6 @@
     "outputTokens": 71
   },
   "providerMetadata": {
-    "typesafe": {
-      "confidence": {
-        "topic": 1
-      }
-    },
     "gateway": {
       "routing": {
         "originalModelId": "typesafe-ai/jev",

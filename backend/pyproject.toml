@@ -13,6 +13,7 @@ dependencies = [
     "elevenlabs>=2.69.0",
     "exa-py>=2.22.2",
     "fastapi>=0.141.1",
+    "httpx>=0.28.1",
     "openai>=3.19.2",
     "passlib[bcrypt]>=1.7.4",
     "psycopg[binary]>=3.3.6",

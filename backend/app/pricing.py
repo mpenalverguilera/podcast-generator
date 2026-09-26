@@ -16,6 +16,7 @@ def cost_for(
     units_out: int = 0,
     *,
     exa_cost_usd: float | None = None,
+    market_cost_usd: float | None = None,
 ) -> tuple[float, bool]:
     """Returns (cost_usd, cost_is_estimate) for one provider call.
 
@@ -30,6 +31,14 @@ def cost_for(
         price_in, _price_cached, price_out = OPENAI_PRICES_PER_1M[model]
         cost = (units_in * price_in + units_out * price_out) / 1_000_000
         return cost, False
+
+    if provider == "vercel_gateway":
+        # Vercel AI Gateway's /v1/evaluate (Jev) returns its own exact marketCost per call --
+        # pass it through, same pattern as Exa's costDollars (D-43). Not `cost`, which reads 0
+        # while the account is still on free evaluation credits.
+        if market_cost_usd is None:
+            raise ValueError("vercel_gateway cost requires market_cost_usd")
+        return market_cost_usd, False
 
     if provider == "exa":
         # Exa returns its own exact costDollars per call; there's no units*rate

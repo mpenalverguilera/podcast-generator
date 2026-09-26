@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
     exa_api_key: SecretStr | None = None
-    typesafe_api_key: SecretStr | None = None
+    # Jev (TypeSafe) is only reachable through Vercel's AI Gateway, not TypeSafe's own API --
+    # see docs/DECISIONS.md D-43 (D-42's direct-SDK integration used the wrong key/endpoint).
+    ai_gateway_api_key: SecretStr | None = None
     search_provider: Literal["exa", "fake"] = "exa"
     llm_provider: Literal["openai", "fake"] = "openai"
 
@@ -42,12 +44,26 @@ class Settings(BaseSettings):
     # Models
     model_profile: str = "gpt-6-sol"
     model_planner: str = "gpt-6-luna"
-    model_classifier: str = "gpt-6-luna"
+    # D-45: Sol, the classifier eval's verdict (eval/results/latest.md). Luna (gpt-6-luna) and Jev
+    # (CLASSIFIER_PROVIDER=jev) stay one .env change away.
+    model_classifier: str = "gpt-6-sol"
     model_script: str = "gpt-6-sol"
     model_script_reasoning: str = "medium"
     model_grounding: str = "gpt-6-luna"
     model_grounding_reasoning: str = "low"
+    # Vercel AI Gateway model slug (provider/model), not a TypeSafe-native version string
+    # (D-43). Pinned rather than an alias so classifier eval numbers stay reproducible.
+    model_jev: str = "typesafe-ai/jev"
+    # The default follows the classifier eval verdict (eval/results/latest.md, D-45). "jev" is
+    # always wrapped in a per-article fallback to the OpenAI classifier (FallbackClassifier) on
+    # Jev errors.
     classifier_provider: Literal["openai", "jev", "fake"] = "openai"
+    # Per attempt. JevClassifier retries 502/503/504 and transport errors up to jev_max_attempts
+    # times; a 429 pauses every Jev call for jev_rate_limit_cooldown_s instead (D-45). Whatever
+    # still fails is scored by the OpenAI classifier (FallbackClassifier).
+    jev_timeout_s: float = 30.0
+    jev_max_attempts: int = 3
+    jev_rate_limit_cooldown_s: float = 300.0
 
     # TTS
     tts_provider: Literal["elevenlabs", "fake"] = "elevenlabs"

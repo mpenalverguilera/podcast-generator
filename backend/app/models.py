@@ -212,6 +212,9 @@ class PipelineStep(Base):
     usage_source: Mapped[str | None] = mapped_column(String, nullable=True)
     provider_request_id: Mapped[str | None] = mapped_column(String, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # D-44: how many candidates in this stage fell back from Jev to the OpenAI classifier.
+    # Meaningful only for the ranking stage once classifier_provider="jev"; 0 elsewhere.
+    fallback_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

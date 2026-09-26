@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from app.models import Article
 
 
-def _topic_for(profile: InterestProfile, topic: str) -> Topic:
+def topic_for(profile: InterestProfile, topic: str) -> Topic:
     """Looks up the profile's own Topic for this name, so the prompt gets the
     user's include/exclude/description. The caller (rank.run) injects a
     synthetic "focus" Topic (description = the episode's focus_request) into
@@ -38,7 +38,7 @@ class LLMClassifier:
         topic: str,
         recent_headlines: list[str],
     ) -> tuple[ArticleScoreResult, Usage]:
-        t = _topic_for(profile, topic)
+        t = topic_for(profile, topic)
         prompt = load_prompt(
             "classifier",
             topic_name=t.name,
