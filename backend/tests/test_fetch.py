@@ -4,6 +4,7 @@ from app.adapters import Adapters
 from app.adapters.search.fake import FakeSearchSource
 from app.models import ArticleScore
 from app.pipeline import fetch
+from app.pipeline.rank import recency_decay
 from app.schemas import RawArticle, Usage
 from tests.conftest import make_user_with_episode
 
@@ -129,3 +130,25 @@ def test_run_with_no_planned_queries_returns_zero_cost(db) -> None:
 
     assert usage.provider == "fake"
     assert usage.cost_usd == 0.0
+
+
+def test_fake_search_dates_are_rebased_to_stay_fresh() -> None:
+    """Regression: the exa_search.json fixture's published_date values are
+    calendar-fixed (captured in phase 00). Before FakeSearchSource rebased
+    them relative to "now", every article aged out of rank.py's 3-day-half-life
+    recency decay within about a week of capture, silently failing every
+    fake-pipeline test with no code change on our side. This pins both halves
+    of the fix: the dates stay recent, and they still clear the fake
+    classifier's score (0.8 x 0.8) through the 0.3 selection threshold."""
+    now = datetime.now(UTC)
+    articles, _usage = FakeSearchSource().search("q", since=None)
+
+    assert articles, "fixture should never be empty"
+    ages = [now - a.published_at for a in articles if a.published_at is not None]
+    # The fixture's own published_dates span ~32h (2026-09-23T00:00 to
+    # 2026-09-24T08:02); rebasing preserves that spread, so the newest
+    # article's age is ~1h and the oldest ~33h -- generous bounds either side
+    # of that catch "not rebased at all" (age in years) without being exact
+    # about wall-clock timing.
+    assert all(timedelta(0) <= age < timedelta(days=2) for age in ages)
+    assert all(0.8 * 0.8 * recency_decay(a.published_at, now) >= 0.3 for a in articles)

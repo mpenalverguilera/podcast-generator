@@ -16,10 +16,15 @@ from app.models import Preferences, User
 
 client = TestClient(app)
 _pwd_context = CryptContext(schemes=["bcrypt"])
+# bcrypt hashing is deliberately slow (~0.2-0.3s/call); every test user has the
+# same password, so hash it once at import instead of once per make_user call
+# (36 call sites in this package alone). login() still does a real bcrypt
+# *verify* against this hash, so the actual auth path stays covered.
+_PASSWORD_HASH = _pwd_context.hash("password123")
 
 
 def make_user(db, *, email: str = "user@example.com", is_admin: bool = False) -> User:
-    user = User(email=email, password_hash=_pwd_context.hash("password123"), is_admin=is_admin)
+    user = User(email=email, password_hash=_PASSWORD_HASH, is_admin=is_admin)
     db.add(user)
     db.flush()
     db.add(

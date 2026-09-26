@@ -23,8 +23,10 @@ os.environ["TTS_PROVIDER"] = "fake"
 import pytest  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 
+from app.config import get_settings  # noqa: E402
 from app.db import Base, SessionLocal, engine  # noqa: E402
 from app.models import Episode, EpisodeStatus, EpisodeTrigger, Preferences, User  # noqa: E402
+from app.pipeline import assemble  # noqa: E402
 
 
 def _create_test_database() -> None:
@@ -49,6 +51,36 @@ def _test_database():
     Base.metadata.create_all(bind=engine)
     yield
     engine.dispose()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "real_ffmpeg: keep assemble.py's real loudnorm filter instead of the "
+        "_fast_test_isolation no-op, for the one test that must exercise it for real.",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _fast_test_isolation(tmp_path, monkeypatch, request):
+    """Two things every test gets for free:
+
+    1. Its own `data_dir` instead of the real `backend/data/` -- test episode
+       ids come from the same autoincrement sequence as real dev/demo
+       episodes, so without this a test run can silently overwrite or reuse
+       (voice.py skips a chunk file that already exists) a real episode's
+       audio/chunks.
+    2. ffmpeg's `loudnorm` filter replaced with a no-op (`anull`) in
+       assemble.py. loudnorm is by far the most expensive part of a
+       full-pipeline test (~4s of a ~4.5s test, benchmarked locally) and
+       tests don't need real loudness normalization, only that assembly
+       produces a playable file. A test marked `@pytest.mark.real_ffmpeg`
+       (one, in test_assemble.py) opts out so the production ffmpeg command
+       stays covered somewhere.
+    """
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    if request.node.get_closest_marker("real_ffmpeg") is None:
+        monkeypatch.setattr(assemble, "_LOUDNORM_FILTER", "anull")
 
 
 @pytest.fixture
