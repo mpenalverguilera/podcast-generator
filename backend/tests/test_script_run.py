@@ -3,6 +3,7 @@ per-section grounding and patching -> polish with change detection and
 reverts. The stub answers from FakeLLM unless a test queues something, and
 its grounding check flags any turn containing the planted marker."""
 
+import json
 import math
 import re
 
@@ -11,6 +12,7 @@ from sqlalchemy import select
 
 from app.adapters import Adapters
 from app.adapters.llm.fake import FakeLLM
+from app.config import get_settings
 from app.models import Article, ArticleScore, ContentSource, EpisodeItem, PipelineStep
 from app.pipeline import script
 from app.pipeline.script import ScriptingError, short_id
@@ -206,6 +208,60 @@ def test_polish_that_changes_facts_in_a_story_is_reverted(db) -> None:
     assert any(t["step"] == "revert" and t["section"] == 1 for t in episode.script["trace"])
     # The reverted section is not counted as a final flag: its words are the draft's.
     assert episode.grounding_flags_final == []
+
+
+def test_trace_writes_every_step_when_script_trace_dir_is_set(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "script_trace_dir", tmp_path / "trace")
+    episode, _ = _episode(db, 2)
+
+    def sneak_in_a_fact(polished: PolishedScript) -> PolishedScript:
+        polished.sections[2].turns[0] = Turn(speaker="host_a", text=f"And revenue hit {_MARKER}.")
+        return polished
+
+    # s1 is flagged and patched clean; polish sneaks a fact into s2, which is reverted.
+    llm = _StubLLM(
+        sections=[_draft(_TWO_STORIES, marker=True), _draft(_TWO_STORIES)],
+        polish=sneak_in_a_fact,
+    )
+    script.run(episode, _adapters(llm), db)
+
+    trace = tmp_path / "trace" / str(episode.id)
+    files = {p.relative_to(trace).as_posix() for p in trace.rglob("*") if p.is_file()}
+    expected = {
+        "00_inputs.md",
+        "01_outline.json",
+        "01_outline.md",
+        "02_s1_draft.md",
+        "03_s1_grounding.json",
+        "04_s1_patched.md",
+        "05_s1_regrounding.json",
+        "02_s2_draft.md",
+        "03_s2_grounding.json",
+        "06_polish.md",
+        "07_polish_grounding.json",
+        "08_final.md",
+        "calls.json",
+    }
+    assert expected <= files
+    assert not any(f.startswith(("04_s2", "05_s2")) for f in files)  # s2 was never flagged
+
+    calls = json.loads((trace / "calls.json").read_text(encoding="utf-8"))
+    prompts = sorted(f for f in files if f.startswith("prompts/"))
+    assert len(calls) == len(prompts) == len(llm.calls)
+    assert [c["step"] for c in calls][:4] == ["outline", "s1_write", "s1_ground", "s1_patch"]
+
+    polish_check = json.loads((trace / "07_polish_grounding.json").read_text(encoding="utf-8"))
+    assert [r["section"] for r in polish_check["reverted"]] == ["s2"]
+    assert "CHANGED" in (trace / "06_polish.md").read_text(encoding="utf-8")
+
+
+def test_trace_writes_nothing_when_script_trace_dir_is_unset(db, tmp_path) -> None:
+    assert get_settings().script_trace_dir is None
+    episode, _ = _episode(db, 2)
+    script.run(episode, _adapters(_StubLLM()), db)
+
+    assert episode.script is not None
+    assert list(tmp_path.rglob("*")) == []  # tmp_path is also conftest's data_dir
 
 
 def test_polish_grounding_checks_only_changed_stories_plus_intro_and_outro(db) -> None:

@@ -35,6 +35,7 @@ from app.models import (
     StepStatus,
 )
 from app.pipeline import context, grounding
+from app.pipeline.script_trace import ScriptTrace, claims_json, turns_diff_md, turns_md
 from app.prompts import load_prompt
 from app.schemas import (
     GroundingReport,
@@ -397,11 +398,19 @@ class _Run:
     grounding_usages: list[Usage] = field(default_factory=list)
     trace: list[ScriptStep] = field(default_factory=list)
     prompt_versions: dict[str, int] = field(default_factory=dict)
+    tracer: ScriptTrace = field(default_factory=lambda: ScriptTrace(None, 0))
 
-    def write(self, prompt: RenderedPrompt, schema: type[BaseModel]) -> tuple[BaseModel, Usage]:
+    def write(
+        self,
+        prompt: RenderedPrompt,
+        schema: type[BaseModel],
+        label: str,
+        section: int | None = None,
+    ) -> tuple[BaseModel, Usage]:
         """One writing-model call (outline, section, patch, polish); the
-        caller records it in the trace once it knows the words/errors."""
-        result, usage = self.llm.structured(
+        caller records it in the trace once it knows the words/errors.
+        `label` only names the call in the optional on-disk trace."""
+        result, usage = self.tracer.wrap(self.llm, label, section).structured(
             prompt,
             schema,
             model=self.settings.model_script,
@@ -412,15 +421,16 @@ class _Run:
         return result, usage
 
     def ground(
-        self, step: str, sections: list[Section], index_map: list[int]
+        self, step: str, sections: list[Section], index_map: list[int], label: str
     ) -> list[UnsupportedClaim]:
         checked = Script(title="", summary="", sections=sections)
-        report, usage = grounding.check(checked, self.sources, self.llm, self.settings)
+        section = index_map[0] if len(index_map) == 1 else None
+        llm = self.tracer.wrap(self.llm, label, section)
+        report, usage = grounding.check(checked, self.sources, llm, self.settings)
         assert isinstance(report, GroundingReport)
         self.grounding_usages.append(usage)
         self.prompt_versions["grounding_check"] = _grounding_prompt_version()
         claims = remap_flags(report.unsupported, index_map)
-        section = index_map[0] if len(index_map) == 1 else None
         self.record(step, usage, section=section, flags=len(claims))
         return claims
 
@@ -479,6 +489,7 @@ def _patch(
     final_index: int,
     *,
     is_story: bool,
+    name: str,
 ) -> list[Turn]:
     sources = "\n\n".join(f"[{sid}] {run.sources[sid]}" for sid in source_ids)
     prompt = load_prompt(
@@ -496,7 +507,7 @@ def _patch(
             else " Keep any audio tags like [laughs] where they are; add no new ones."
         ),
     )
-    patched, usage = run.write(prompt, SectionDraft)
+    patched, usage = run.write(prompt, SectionDraft, f"{name}_{step}", final_index)
     assert isinstance(patched, SectionDraft)
     run.record(step, usage, section=final_index, words=word_count(patched.turns))
     return patched.turns
@@ -511,10 +522,17 @@ def _fix_flags(
     final_index: int,
     *,
     is_story: bool,
+    name: str,
 ) -> tuple[Section, list[UnsupportedClaim]]:
     """One patch with the flags visible, one re-check; keeps whichever
     version has fewer flags. `grounded_as` is the source ids the section is
-    checked against (its own for a story, all selected for intro/outro)."""
+    checked against (its own for a story, all selected for intro/outro).
+    `name` (s1, intro, ...) only names the optional trace files."""
+    patched_file, reground_file = (
+        (f"04_{name}_patched.md", f"05_{name}_regrounding.json")
+        if is_story
+        else (f"07_{name}_patched.md", f"07_{name}_regrounding.json")
+    )
     turns = _patch(
         run,
         "patch",
@@ -524,8 +542,13 @@ def _fix_flags(
         target_words,
         final_index,
         is_story=is_story,
+        name=name,
     )
     errors = validate_section(turns, list(run.names.values()), target_words, is_story=is_story)
+    header = (
+        f"# {name} patched -- {word_count(turns)} words (target {target_words})\n\n"
+        f"Patched against {len(flags)} flag(s):\n{grounding.format_issues(flags)}\n\n"
+    )
     if errors and not only_word_count_errors(errors):
         logger.warning(
             "episode %s section %s patch broke the section (%s); keeping the draft",
@@ -533,12 +556,39 @@ def _fix_flags(
             final_index,
             "; ".join(errors),
         )
+        run.tracer.write_text(
+            patched_file,
+            header
+            + f"**Patch rejected** ({'; '.join(errors)}); the draft was kept.\n\n"
+            + turns_md(turns, run.names),
+        )
         return section, flags
     candidate = section.model_copy(update={"turns": turns})
-    new_flags = run.ground(
-        "reground", [candidate.model_copy(update={"source_ids": grounded_as})], [final_index]
+    run.tracer.write_text(
+        patched_file,
+        header
+        + (f"Validation notes: {'; '.join(errors)}\n\n" if errors else "")
+        + turns_diff_md(section.turns, turns, run.names),
     )
-    if len(new_flags) < len(flags):
+    new_flags = run.ground(
+        "reground",
+        [candidate.model_copy(update={"source_ids": grounded_as})],
+        [final_index],
+        f"{name}_reground",
+    )
+    kept = "patched" if len(new_flags) < len(flags) else "draft"
+    run.tracer.write_json(
+        reground_file,
+        {
+            "section": name,
+            "checked_against": grounded_as,
+            "flags_before": len(flags),
+            "flags_after": len(new_flags),
+            "kept": kept,
+            "flags": claims_json(new_flags),
+        },
+    )
+    if kept == "patched":
         return candidate, new_flags
     return section, flags
 
@@ -576,7 +626,7 @@ def _outline(
         ),
     )
     selected_ids = {s.sid for s in sources}
-    outline, usage = run.write(prompt, Outline)
+    outline, usage = run.write(prompt, Outline, "outline")
     assert isinstance(outline, Outline)
     errors = validate_outline(outline, selected_ids)
     run.record("outline", usage, flags=len(errors) or None, note="; ".join(errors) or None)
@@ -590,7 +640,7 @@ def _outline(
                 + "\n".join(f"- {e}" for e in errors)
             }
         )
-        outline, usage = run.write(retry, Outline)
+        outline, usage = run.write(retry, Outline, "outline_retry")
         assert isinstance(outline, Outline)
         errors = validate_outline(outline, selected_ids)
         run.record("outline_retry", usage, flags=len(errors) or None)
@@ -634,7 +684,8 @@ def write_section(
         prior_sections=_render_prior(prior_sections, run.names),
     )
     final_index = k + 1
-    draft, usage = run.write(prompt, SectionDraft)
+    name = f"s{final_index}"
+    draft, usage = run.write(prompt, SectionDraft, f"{name}_write", final_index)
     assert isinstance(draft, SectionDraft)
     turns = draft.turns
     host_names = list(run.names.values())
@@ -646,6 +697,14 @@ def write_section(
         words=word_count(turns),
         note="; ".join(errors) or None,
     )
+    trace_md = [
+        f"# {name} draft -- {plan.headline}\n",
+        f"Sources: {', '.join(plan.source_ids)}. Depth: {plan.depth}.\n",
+        f"First pass: {word_count(turns)} words (target {plan.target_words}, "
+        f"±{round(_SECTION_WORD_TOLERANCE * 100)}%).",
+        f"Validation: {'; '.join(errors) or 'ok'}\n",
+        turns_md(turns, run.names),
+    ]
     if errors:
         turns = _patch(
             run,
@@ -656,17 +715,24 @@ def write_section(
             plan.target_words,
             final_index,
             is_story=True,
+            name=name,
         )
         errors = validate_section(turns, host_names, plan.target_words)
-        if errors and not only_word_count_errors(errors):
-            raise RuntimeError(f"section {final_index} invalid after a fix: {'; '.join(errors)}")
-        if errors:
-            logger.warning(
-                "episode %s section %s accepted off-length: %s",
-                run.episode_id,
-                final_index,
-                errors[0],
-            )
+        trace_md += [
+            f"\n## After the fix call: {word_count(turns)} words (target {plan.target_words})",
+            f"Validation: {'; '.join(errors) or 'ok'}\n",
+            turns_md(turns, run.names),
+        ]
+    run.tracer.write_text(f"02_{name}_draft.md", "\n".join(trace_md))
+    if errors and not only_word_count_errors(errors):
+        raise RuntimeError(f"section {final_index} invalid after a fix: {'; '.join(errors)}")
+    if errors:
+        logger.warning(
+            "episode %s section %s accepted off-length: %s",
+            run.episode_id,
+            final_index,
+            errors[0],
+        )
     return Section(
         kind="story", story_id=plan.story_id, source_ids=list(plan.source_ids), turns=turns
     )
@@ -704,7 +770,7 @@ def _polish(
         outro_words=str(frame - intro_words),
         drafts=json.dumps([d.model_dump() for d in drafts], indent=1),
     )
-    polished, usage = run.write(prompt, PolishedScript)
+    polished, usage = run.write(prompt, PolishedScript, "polish")
     assert isinstance(polished, PolishedScript)
     frame_errors, _ = check_polish(polished, drafts)
     run.record(
@@ -721,7 +787,7 @@ def _polish(
                 + "\n".join(f"- {e}" for e in frame_errors)
             }
         )
-        polished, usage = run.write(retry, PolishedScript)
+        polished, usage = run.write(retry, PolishedScript, "polish_retry")
         assert isinstance(polished, PolishedScript)
         frame_errors, _ = check_polish(polished, drafts)
         run.record("polish_retry", usage, words=script_word_count(polished.sections))
@@ -772,6 +838,117 @@ def resolve_topics(scores: list[ArticleScore]) -> dict[int, str]:
     return topics
 
 
+# --- optional trace files (script_trace.py) -----------------------------------
+
+
+def _inputs_md(
+    episode: Episode,
+    profile: InterestProfile,
+    names: dict[str, str],
+    tone: str,
+    headlines: list[str],
+    sources: list[_Source],
+    total: int,
+    frame: int,
+) -> str:
+    lines = [
+        f"# Episode {episode.id} -- scripting inputs\n",
+        "## Profile",
+        *[f"- {_topic_profile_line(profile, t.name)}" for t in profile.topics],
+        f"- Avoid: {', '.join(profile.avoid) or '(nothing)'}",
+        f"\nFocus request: {episode.focus_request or '(none)'}",
+        f"Hosts: {names['host_a']} (host_a), {names['host_b']} (host_b). Tone: {tone}",
+        f"Recent headlines: {'; '.join(headlines) or '(none)'}\n",
+        f"## Budget\nTarget {episode.target_minutes} min x {_WORDS_PER_MINUTE} wpm = {total} "
+        f"words: frame {frame} (intro {round(frame * _INTRO_SHARE_OF_FRAME)}), "
+        f"stories {total - frame}\n",
+        f"## Selected articles ({len(sources)})",
+        "| id | outlet | date | title | topic | content |",
+        "|---|---|---|---|---|---|",
+    ]
+    for s in sources:
+        date = s.article.published_at.date().isoformat() if s.article.published_at else "undated"
+        content = "highlights only" if s.thin else f"full text ({len(s.text)} chars shown)"
+        title = (s.article.title or "(untitled)").replace("|", "/")
+        lines.append(f"| {s.sid} | {s.outlet} | {date} | {title} | {s.topic_label} | {content} |")
+    return "\n".join(lines)
+
+
+def _outline_md(outline: Outline, raw_targets: list[int]) -> str:
+    lines = [f"# Outline\n\nCold open: {outline.cold_open_hook}\n"]
+    for s, raw in zip(outline.sections, raw_targets, strict=True):
+        lines += [
+            f"## {s.story_id}: {s.headline}",
+            f"- sources: {', '.join(s.source_ids)} | topic: {s.topic_label} | depth: {s.depth}",
+            f"- target words: {s.target_words} (model asked for {raw})",
+            f"- angle: {s.angle}",
+            f"- why the listener cares: {s.why_listener_cares}",
+            f"- bridge in: {s.bridge_in or '-'}",
+            "- key facts:",
+            *[f"  - {f}" for f in s.key_facts],
+            f"- must not cover: {'; '.join(s.must_not_cover) or '-'}\n",
+        ]
+    if outline.dropped:
+        lines.append("## Dropped")
+        lines += [f"- {d.source_id}: {d.reason}" for d in outline.dropped]
+    return "\n".join(lines)
+
+
+def _polish_md(
+    polished: PolishedScript,
+    drafts: list[Section],
+    stories_ok: bool,
+    changed: list[int],
+    names: dict[str, str],
+) -> str:
+    lines = [
+        f"# Polish -- {polished.title}\n",
+        f"Summary: {polished.summary}\n",
+        f"Polished words: {script_word_count(polished.sections)}. "
+        f"Story sections with changed words (grounded again): "
+        f"{', '.join(f's{i + 1}' for i in changed) or 'none'}.",
+    ]
+    if not stories_ok:
+        lines.append(
+            "\n**Polish changed the story sections' structure; its story sections were "
+            "discarded and the drafts kept.**"
+        )
+    stories = iter(drafts)
+    for s in polished.sections:
+        if s.kind != "story":
+            lines += [f"\n## {s.kind} (new, {word_count(s.turns)} words)", turns_md(s.turns, names)]
+            continue
+        draft = next(stories, None)
+        label = f"story {s.story_id}"
+        if draft is None:
+            lines += [f"\n## {label} (no matching draft)", turns_md(s.turns, names)]
+            continue
+        kind = (
+            "words changed"
+            if _spoken(draft) != _spoken(s)
+            else ("tags only" if draft.turns != s.turns else "unchanged")
+        )
+        lines += [
+            f"\n## {label} ({kind}, {word_count(draft.turns)} → {word_count(s.turns)} words)",
+            turns_diff_md(draft.turns, s.turns, names),
+        ]
+    return "\n".join(lines)
+
+
+def _final_md(script: Script, names: dict[str, str], total: int) -> str:
+    words = script_word_count(script.sections)
+    lines = [f"# {script.title}\n", script.summary, ""]
+    for i, s in enumerate(script.sections):
+        label = s.kind if s.kind != "story" else f"story {s.story_id} ({', '.join(s.source_ids)})"
+        lines += [f"## {i}. {label} -- {word_count(s.turns)} words"]
+        lines += [f"**{names[t.speaker]}:** {t.text}\n" for t in s.turns]
+    lines.append(
+        f"---\nTotal: {words} words vs budget {total} ({words - total:+d}, "
+        f"{(words - total) / total:+.0%}; tolerance ±{round(_TOTAL_WORD_TOLERANCE * 100)}%)"
+    )
+    return "\n".join(lines)
+
+
 def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     settings = get_settings()
     items, articles, topics = _load_inputs(episode, db)
@@ -803,8 +980,14 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
         names=names,
         tone=tone,
         sources={s.sid: s.text for s in sources},
+        tracer=ScriptTrace(settings.script_trace_dir, episode.id),
     )
     total, frame, story_budget = word_budget(episode.target_minutes)
+    if run_.tracer.enabled:
+        run_.tracer.write_text(
+            "00_inputs.md",
+            _inputs_md(episode, profile, names, tone, headlines, sources, total, frame),
+        )
 
     try:
         script, initial_flags, final_flags = _script(
@@ -878,10 +1061,15 @@ def _script(
 ) -> tuple[Script, list[UnsupportedClaim], list[UnsupportedClaim]]:
     # 1. Outline
     outline = _outline(run_, sources, profile, episode, headlines, story_budget)
-    targets = normalize_targets([s.target_words for s in outline.sections], story_budget)
+    raw_targets = [s.target_words for s in outline.sections]
+    targets = normalize_targets(raw_targets, story_budget)
     for plan, target in zip(outline.sections, targets, strict=True):
         plan.target_words = target
     apply_outline_order(outline, items_by_sid)
+    run_.tracer.write_json(
+        "01_outline.json", {"outline": outline.model_dump(), "model_target_words": raw_targets}
+    )
+    run_.tracer.write_text("01_outline.md", _outline_md(outline, raw_targets))
 
     # 2. Sections, sequentially, each grounded against its own sources
     drafts: list[Section] = []
@@ -890,7 +1078,12 @@ def _script(
     for k, plan in enumerate(outline.sections):
         section = write_section(run_, outline, k, drafts, source_by_id, profile)
         final_index = k + 1
-        flags = run_.ground("ground", [section], [final_index])
+        name = f"s{final_index}"
+        flags = run_.ground("ground", [section], [final_index], f"{name}_ground")
+        run_.tracer.write_json(
+            f"03_{name}_grounding.json",
+            {"section": name, "checked_against": section.source_ids, "flags": claims_json(flags)},
+        )
         flags_initial[final_index] = flags
         if flags:
             section, flags = _fix_flags(
@@ -901,6 +1094,7 @@ def _script(
                 plan.target_words,
                 final_index,
                 is_story=True,
+                name=name,
             )
         flags_final[final_index] = flags
         drafts.append(section)
@@ -925,6 +1119,9 @@ def _script(
         run_.record("polish_discarded", Usage(provider="none"), note="kept drafts for stories")
         stories = drafts
     changed = changed_story_indices(drafts, stories)
+    run_.tracer.write_text(
+        "06_polish.md", _polish_md(polished, drafts, stories_ok, changed, run_.names)
+    )
 
     n = len(drafts)
     all_ids = [s.sid for s in sources]
@@ -934,7 +1131,7 @@ def _script(
         outro.model_copy(update={"source_ids": all_ids}),
     ]
     index_map = [0, *[i + 1 for i in changed], n + 1]
-    polish_flags = run_.ground("ground_polish", checked, index_map)
+    polish_flags = run_.ground("ground_polish", checked, index_map, "polish_ground")
     by_index: dict[int, list[UnsupportedClaim]] = {}
     for c in polish_flags:
         by_index.setdefault(c.section_index, []).append(c)
@@ -958,9 +1155,48 @@ def _script(
         flags_initial[idx] = flags
         if flags:
             fixed[idx], flags = _fix_flags(
-                run_, fixed[idx], all_ids, flags, frame_budget[idx], idx, is_story=False
+                run_,
+                fixed[idx],
+                all_ids,
+                flags,
+                frame_budget[idx],
+                idx,
+                is_story=False,
+                name="intro" if idx == 0 else "outro",
             )
         flags_final[idx] = flags
+
+    if run_.tracer.enabled:
+
+        def sec_name(idx: int) -> str:
+            return "intro" if idx == 0 else "outro" if idx == n + 1 else f"s{idx}"
+
+        run_.tracer.write_json(
+            "07_polish_grounding.json",
+            {
+                "polish_stories_kept": stories_ok,
+                "checked": [
+                    {"section": sec_name(idx), "index": idx, "source_ids": s.source_ids}
+                    for idx, s in zip(index_map, checked, strict=True)
+                ],
+                "not_checked_unchanged": [f"s{i + 1}" for i in range(n) if i not in changed],
+                "flags": [
+                    {"section": sec_name(c.section_index), **c.model_dump()} for c in polish_flags
+                ],
+                "reverted": [
+                    {
+                        "section": f"s{i + 1}",
+                        "flagged_turns": sorted({c.turn_index for c in by_index[i + 1]}),
+                        "claims": [c.claim for c in by_index[i + 1]],
+                    }
+                    for i in sorted(reverted)
+                ],
+                "frame_flags_after_patch": {
+                    "intro": claims_json(flags_final[0]),
+                    "outro": claims_json(flags_final[n + 1]),
+                },
+            },
+        )
 
     sections = [fixed[0], *stories, fixed[n + 1]]
     words = script_word_count(sections)
@@ -979,6 +1215,8 @@ def _script(
         outline=outline,
         trace=run_.trace,
     )
+    if run_.tracer.enabled:
+        run_.tracer.write_text("08_final.md", _final_md(script, run_.names, total))
 
     def flatten(d: dict[int, list[UnsupportedClaim]]) -> list[UnsupportedClaim]:
         return [c for idx in sorted(d) for c in d[idx]]

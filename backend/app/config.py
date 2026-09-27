@@ -90,6 +90,9 @@ class Settings(BaseSettings):
 
     # Paths
     data_dir: Path = Path("./data")
+    # Debug only: when set, the scripting stage writes every intermediate step
+    # and rendered prompt to <dir>/<episode_id>/ (app/pipeline/script_trace.py, D-60).
+    script_trace_dir: Path | None = None
 
     # Logging -- terminal-only, architectural (stage transitions, not
     # per-request provider chatter); see app/logging_setup.py.
