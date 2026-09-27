@@ -52,6 +52,9 @@ class ArticleScoreResult(BaseModel):
     already_covered: bool = False
     same_event_as_url: str | None = None
     score: float
+    # classifier.v2 (D-61): the title/highlights show the event happened before the episode
+    # window, whatever `published_at` says. Not persisted: rank.py uses it in the same run.
+    is_stale: bool = False
 
 
 class Turn(BaseModel):

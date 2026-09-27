@@ -44,16 +44,22 @@ class Settings(BaseSettings):
     # Models
     model_profile: str = "gpt-6-sol"
     model_planner: str = "gpt-6-luna"
-    # D-45: Sol, the classifier eval's verdict (eval/results/latest.md). Luna (gpt-6-luna) and Jev
+    # D-45, reconfirmed on classifier.v2 by D-61 (eval/results/classifier_v2_grid.md): Sol with no
+    # reasoning. Luna at none/low/medium missed the quality gates. Luna (gpt-6-luna) and Jev
     # (CLASSIFIER_PROVIDER=jev) stay one .env change away.
     model_classifier: str = "gpt-6-sol"
+    model_classifier_reasoning: str = "none"
     model_script: str = "gpt-6-sol"
     model_script_reasoning: str = "medium"
     model_grounding: str = "gpt-6-luna"
+    # D-61 (eval/results/grounding_noise.md): medium cut verdict flips by only 12% at 1.26x cost.
     model_grounding_reasoning: str = "low"
     # Vercel AI Gateway model slug (provider/model), not a TypeSafe-native version string
     # (D-43). Pinned rather than an alias so classifier eval numbers stay reproducible.
     model_jev: str = "typesafe-ai/jev"
+    # Per request, for every OpenAI call (the SDK default is 10 minutes; one grounding call took
+    # 342 s). The OpenAI client also retries once on a timeout/5xx/429 (D-61).
+    openai_timeout_s: float = 90.0
     # The default follows the classifier eval verdict (eval/results/latest.md, D-45). "jev" is
     # always wrapped in a per-article fallback to the OpenAI classifier (FallbackClassifier) on
     # Jev errors.

@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -19,6 +20,7 @@ FIXTURE = json.loads(
     Path(__file__).parent.joinpath("fixtures/jev_evaluate.json").read_text(encoding="utf-8")
 )
 SETTINGS = Settings(ai_gateway_api_key="agw-test", jev_max_attempts=3)
+_WINDOW = datetime(2026, 9, 20, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +75,7 @@ def test_score_answers_are_normalized_and_usage_is_exact() -> None:
     requests: list[httpx.Request] = []
     client, _ = _client([200], requests)
     result, usage = JevClassifier(SETTINGS, client=client).score(
-        _article(), _profile(), "Space launches", ["Old unrelated headline"]
+        _article(), _profile(), "Space launches", ["Old unrelated headline"], _WINDOW
     )
 
     assert result.topic == "Space launches"
@@ -81,6 +83,7 @@ def test_score_answers_are_normalized_and_usage_is_exact() -> None:
     assert result.newsworthy == pytest.approx(2.61 / 3)  # 4 rungs -> score / 3
     assert result.score == pytest.approx(result.relevance * result.newsworthy)
     assert result.already_covered is False  # fixture probability 0.04 <= 0.5
+    assert result.is_stale is False  # jev.v2 has no staleness question (D-61)
 
     assert usage.provider == "vercel_gateway"
     assert usage.model == "typesafe-ai/jev"
@@ -94,7 +97,7 @@ def test_request_scores_only_the_one_topic_with_graded_questions() -> None:
     requests: list[httpx.Request] = []
     client, _ = _client([200], requests)
     JevClassifier(SETTINGS, client=client).score(
-        _article(), _profile(), "Space launches", ["Old unrelated headline"]
+        _article(), _profile(), "Space launches", ["Old unrelated headline"], _WINDOW
     )
 
     sent = json.loads(requests[0].content)
@@ -116,7 +119,7 @@ def test_server_errors_are_retried_with_backoff(server_error: int, sleeps: list[
     requests: list[httpx.Request] = []
     client, count = _client([server_error, server_error, 200], requests)
     result, _ = JevClassifier(SETTINGS, client=client).score(
-        _article(), _profile(), "Space launches", []
+        _article(), _profile(), "Space launches", [], _WINDOW
     )
     assert count() == 3
     assert sleeps == [0.5, 1.0]
@@ -127,7 +130,9 @@ def test_server_error_gives_up_after_max_attempts() -> None:
     requests: list[httpx.Request] = []
     client, count = _client([503, 503, 503], requests)
     with pytest.raises(httpx.HTTPStatusError):
-        JevClassifier(SETTINGS, client=client).score(_article(), _profile(), "Space launches", [])
+        JevClassifier(SETTINGS, client=client).score(
+            _article(), _profile(), "Space launches", [], _WINDOW
+        )
     assert count() == 3
 
 
@@ -136,7 +141,9 @@ def test_short_retry_after_is_honored(sleeps: list[float]) -> None:
     client, count = _client(
         [(503, {"retry-after": "2"}), (429, {"retry-after": "1"}), 200], requests
     )
-    JevClassifier(SETTINGS, client=client).score(_article(), _profile(), "Space launches", [])
+    JevClassifier(SETTINGS, client=client).score(
+        _article(), _profile(), "Space launches", [], _WINDOW
+    )
     assert count() == 3
     assert sleeps == [2.0, 1.0]
 
@@ -146,13 +153,13 @@ def test_429_pauses_jev_without_further_calls() -> None:
     client, count = _client([429], requests)
     classifier = JevClassifier(SETTINGS, client=client)
     with pytest.raises(JevRateLimited):
-        classifier.score(_article(), _profile(), "Space launches", [])
+        classifier.score(_article(), _profile(), "Space launches", [], _WINDOW)
     assert count() == 1
     assert jev.cooldown_remaining_s() == pytest.approx(300, abs=5)
 
     # While paused, calls fail fast with no HTTP request, so FallbackClassifier moves on to Luna.
     with pytest.raises(JevRateLimited):
-        classifier.score(_article(), _profile(), "Space launches", [])
+        classifier.score(_article(), _profile(), "Space launches", [], _WINDOW)
     assert count() == 1
 
 
@@ -160,7 +167,9 @@ def test_long_retry_after_on_429_extends_the_pause() -> None:
     requests: list[httpx.Request] = []
     client, _ = _client([(429, {"retry-after": "600"})], requests)
     with pytest.raises(JevRateLimited):
-        JevClassifier(SETTINGS, client=client).score(_article(), _profile(), "Space launches", [])
+        JevClassifier(SETTINGS, client=client).score(
+            _article(), _profile(), "Space launches", [], _WINDOW
+        )
     assert jev.cooldown_remaining_s() == pytest.approx(600, abs=5)
 
 
@@ -169,9 +178,9 @@ def test_calls_resume_once_the_pause_is_over(monkeypatch: pytest.MonkeyPatch) ->
     client, count = _client([429, 200], requests)
     classifier = JevClassifier(SETTINGS, client=client)
     with pytest.raises(JevRateLimited):
-        classifier.score(_article(), _profile(), "Space launches", [])
+        classifier.score(_article(), _profile(), "Space launches", [], _WINDOW)
     monkeypatch.setattr(jev, "_cooldown_until", 0.0)  # the 5 minutes have passed
-    result, _ = classifier.score(_article(), _profile(), "Space launches", [])
+    result, _ = classifier.score(_article(), _profile(), "Space launches", [], _WINDOW)
     assert count() == 2
     assert result.relevance > 0
 
@@ -187,7 +196,9 @@ def test_client_errors_are_not_retried() -> None:
     requests: list[httpx.Request] = []
     client, count = _client([400], requests)
     with pytest.raises(httpx.HTTPStatusError):
-        JevClassifier(SETTINGS, client=client).score(_article(), _profile(), "Space launches", [])
+        JevClassifier(SETTINGS, client=client).score(
+            _article(), _profile(), "Space launches", [], _WINDOW
+        )
     assert count() == 1
 
 

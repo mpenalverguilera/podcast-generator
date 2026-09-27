@@ -35,6 +35,7 @@ class Candidate:
     newsworthy: float
     already_covered: bool
     published_at: datetime | None
+    is_stale: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,17 +72,22 @@ def select_stories(
     candidates: list[Candidate], target_minutes: int, now: datetime
 ) -> list[Selected]:
     """Pure selection logic (docs/phases/03-pipeline.md step 1 / ARCHITECTURE
-    §5.3): final = relevance x newsworthy x recency decay; drop already_covered
-    and final < 0.3; per-topic cap for variety; one focus-request slot reserved
-    first, opening the episode. Same-event collapsing is cut (D-22) -- this is
-    the documented simple top-N-per-topic fallback.
+    §5.3): final = relevance x newsworthy x recency decay; drop already_covered,
+    is_stale (D-61) and final < 0.3. Then, in order (D-61):
+      1. one focus-request slot, reserved first, opening the episode;
+      2. topic coverage: each remaining topic, strongest first (by its best
+         candidate's score), gets its best eligible candidate while slots remain,
+         so no topic gets a second story before every topic has had one;
+      3. the rest by score, under a per-topic cap for variety.
+    After the focus slot, stories are ordered by score. Same-event collapsing is
+    cut (D-22).
     """
     story_count = story_count_for(target_minutes)
     per_topic_cap = math.ceil(story_count / 2)
 
     scored: list[tuple[float, Candidate]] = []
     for c in candidates:
-        if c.already_covered:
+        if c.already_covered or c.is_stale:
             continue
         final = c.relevance * c.newsworthy * recency_decay(c.published_at, now)
         if final < _MIN_SCORE:
@@ -89,31 +95,54 @@ def select_stories(
         scored.append((final, c))
     scored.sort(key=lambda pair: pair[0], reverse=True)
 
-    selected: list[Candidate] = []
+    focus: Candidate | None = None
+    rest: list[tuple[float, Candidate]] = []
     selected_article_ids: set[int] = set()
     per_topic_count: dict[str, int] = {}
 
+    def _can_take(candidate: Candidate) -> bool:
+        return (
+            candidate.article_id not in selected_article_ids
+            and per_topic_count.get(candidate.topic, 0) < per_topic_cap
+        )
+
     def _take(candidate: Candidate) -> None:
-        selected.append(candidate)
         selected_article_ids.add(candidate.article_id)
         per_topic_count[candidate.topic] = per_topic_count.get(candidate.topic, 0) + 1
 
+    # 1. Focus slot.
     focus_scored = [pair for pair in scored if pair[1].topic == _FOCUS_TOPIC]
     if focus_scored:
-        _take(focus_scored[0][1])
+        focus = focus_scored[0][1]
+        _take(focus)
 
-    for _final, c in scored:
-        if len(selected) >= story_count:
+    def _slots_left() -> bool:
+        return len(rest) + (focus is not None) < story_count
+
+    # 2. Topic coverage. `scored` is sorted, so the first time a topic appears is its best
+    # candidate, and topics are visited strongest first.
+    for final, c in scored:
+        if not _slots_left():
             break
-        if c.article_id in selected_article_ids:
+        if c.topic == _FOCUS_TOPIC or per_topic_count.get(c.topic, 0) > 0:
             continue
-        if per_topic_count.get(c.topic, 0) >= per_topic_cap:
-            continue
-        _take(c)
+        if _can_take(c):
+            rest.append((final, c))
+            _take(c)
 
+    # 3. Fill by score.
+    for final, c in scored:
+        if not _slots_left():
+            break
+        if _can_take(c):
+            rest.append((final, c))
+            _take(c)
+
+    rest.sort(key=lambda pair: pair[0], reverse=True)
+    ordered = ([focus] if focus is not None else []) + [c for _final, c in rest]
     return [
         Selected(article_id=c.article_id, topic=c.topic, story_id=f"s{i + 1}", position=i)
-        for i, c in enumerate(selected)
+        for i, c in enumerate(ordered)
     ]
 
 
@@ -141,9 +170,10 @@ def _score_one(
     focus_request: str | None,
     topic: str,
     headlines: list[str],
+    window_start: datetime,
 ) -> tuple[ArticleScoreResult, Usage]:
     topic_profile = _profile_for_topic(profile, topic, focus_request)
-    return adapters.classifier.score(article, topic_profile, topic, headlines)
+    return adapters.classifier.score(article, topic_profile, topic, headlines, window_start)
 
 
 def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
@@ -171,6 +201,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
                 episode.focus_request,
                 row.topic,
                 headlines,
+                episode.window_start,
             ): row
             for row in rows
         }
@@ -215,10 +246,20 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
                 newsworthy=result.newsworthy,
                 already_covered=result.already_covered,
                 published_at=articles[row.article_id].published_at,
+                is_stale=result.is_stale,
             )
         )
+        if result.is_stale:
+            logger.debug(
+                "episode %s: article %s (%r) judged stale for topic %r",
+                episode.id,
+                row.article_id,
+                articles[row.article_id].title,
+                row.topic,
+            )
 
     selected = select_stories(candidates, episode.target_minutes, now)
+    stale_count = sum(1 for c in candidates if c.is_stale)
 
     # Idempotent on retry: a rank-stage failure after some rows were already
     # written (or a manual re-run) must not leave duplicate episode_items.
@@ -235,9 +276,11 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     db.flush()
 
     logger.info(
-        "episode %s ranked %d candidates, selected %d stories, cost=$%.4f, %d fallbacks",
+        "episode %s ranked %d candidates, dropped %d as stale, selected %d stories, "
+        "cost=$%.4f, %d fallbacks",
         episode.id,
         len(rows),
+        stale_count,
         len(selected),
         total_cost,
         total_fallback_count,

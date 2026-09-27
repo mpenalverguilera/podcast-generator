@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.schemas import ArticleScoreResult, InterestProfile, Usage
@@ -21,6 +22,7 @@ class FakeClassifier:
         profile: InterestProfile,
         topic: str,
         recent_headlines: list[str],
+        window_start: datetime,
     ) -> tuple[ArticleScoreResult, Usage]:
         result = ArticleScoreResult(
             topic=topic,

@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.adapters.llm.protocol import LLM
@@ -25,11 +27,21 @@ def topic_for(profile: InterestProfile, topic: str) -> Topic:
 
 class LLMClassifier:
     """Real Classifier, composed from an LLM adapter (not a fresh OpenAI client)
-    per ARCHITECTURE §6's "(wraps LLM)". Runtime prompt: classifier.v1.md."""
+    per ARCHITECTURE §6's "(wraps LLM)". Runtime prompt: the latest classifier.vN.md
+    (v2, D-61: adds today's date and the episode window, and returns is_stale).
 
-    def __init__(self, llm: LLM, settings: Settings | None = None) -> None:
+    `clock` returns "now"; it defaults to the real clock and exists so the eval can
+    pin "today" to when its articles were actually fetched."""
+
+    def __init__(
+        self,
+        llm: LLM,
+        settings: Settings | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._llm = llm
         self._settings = settings or get_settings()
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def score(
         self,
@@ -37,6 +49,7 @@ class LLMClassifier:
         profile: InterestProfile,
         topic: str,
         recent_headlines: list[str],
+        window_start: datetime,
     ) -> tuple[ArticleScoreResult, Usage]:
         t = topic_for(profile, topic)
         prompt = load_prompt(
@@ -51,11 +64,13 @@ class LLMClassifier:
             published_at=article.published_at.isoformat() if article.published_at else "unknown",
             highlights="\n".join(article.highlights or []) or "(no highlights)",
             recent_headlines="\n".join(f"- {h}" for h in recent_headlines) or "(none)",
+            today=self._clock().date().isoformat(),
+            window_start=window_start.date().isoformat(),
         )
         parsed, usage = self._llm.structured(
             prompt,
             ArticleScoreResult,
             model=self._settings.model_classifier,
-            reasoning="none",
+            reasoning=self._settings.model_classifier_reasoning,
         )
         return parsed, usage

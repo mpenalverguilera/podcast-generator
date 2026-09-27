@@ -1,6 +1,10 @@
+from datetime import UTC, datetime
+
 from app.adapters.classifier.fallback import FallbackClassifier
 from app.models import Article
 from app.schemas import ArticleScoreResult, InterestProfile, Topic, Usage
+
+_WINDOW = datetime(2026, 9, 20, tzinfo=UTC)
 
 
 class _StubClassifier:
@@ -13,7 +17,7 @@ class _StubClassifier:
         self._raises = raises
         self.calls = 0
 
-    def score(self, article, profile, topic, recent_headlines):
+    def score(self, article, profile, topic, recent_headlines, window_start):
         self.calls += 1
         if self._raises is not None:
             raise self._raises
@@ -39,7 +43,7 @@ def test_primary_success_never_calls_fallback() -> None:
     fallback = _StubClassifier(result=_score_result(0.5), usage=Usage(provider="openai"))
     classifier = FallbackClassifier(primary, fallback)
 
-    result, usage = classifier.score(_article(), _profile(), "Space", [])
+    result, usage = classifier.score(_article(), _profile(), "Space", [], _WINDOW)
 
     assert result.relevance == 0.9
     assert usage.provider == "vercel_gateway"
@@ -55,7 +59,7 @@ def test_primary_exception_falls_back_and_counts_it() -> None:
     fallback = _StubClassifier(result=_score_result(0.5), usage=Usage(provider="openai"))
     classifier = FallbackClassifier(primary, fallback)
 
-    result, usage = classifier.score(_article(), _profile(), "Space", [])
+    result, usage = classifier.score(_article(), _profile(), "Space", [], _WINDOW)
 
     assert result.relevance == 0.5
     assert usage.provider == "openai"
@@ -72,7 +76,7 @@ def test_fallback_preserves_fallback_classifiers_own_usage_fields() -> None:
     fallback = _StubClassifier(result=_score_result(0.5), usage=fallback_usage)
     classifier = FallbackClassifier(primary, fallback)
 
-    _, usage = classifier.score(_article(), _profile(), "Space", [])
+    _, usage = classifier.score(_article(), _profile(), "Space", [], _WINDOW)
 
     assert usage.model == "gpt-6-luna"
     assert usage.cost_usd == 0.001
