@@ -91,14 +91,18 @@ class _TrackingTTS:
         self.fail_on = fail_on
         self.delay_s = delay_s
         self.calls: list[str] = []
+        self.voices_seen: list[dict[str, str]] = []
         self.in_flight = 0
         self.peak = 0
         self._lock = threading.Lock()
 
-    def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]:
+    def synthesize_chunk(
+        self, turns: list[Turn], seed: int | None, voices: dict[str, str]
+    ) -> tuple[bytes, Usage]:
         letter = turns[0].text[0]
         with self._lock:
             self.calls.append(letter)
+            self.voices_seen.append(voices)
             self.in_flight += 1
             self.peak = max(self.peak, self.in_flight)
         try:
@@ -157,6 +161,9 @@ def test_voicing_runs_chunks_in_parallel_up_to_the_concurrency_limit(db, monkeyp
     for i, letter in enumerate(_LETTERS):
         assert _chunk_path(episode.id, i).read_bytes() == letter.encode()
     assert not list(_chunk_dir(episode.id).glob("*.part"))
+    # D-58: every chunk, including ones synthesized concurrently, gets the
+    # same resolved voice mapping (here, the test defaults from conftest).
+    assert tts.voices_seen == [{"host_a": "test-voice-a", "host_b": "test-voice-b"}] * len(_LETTERS)
 
 
 def test_latency_is_wall_clock_not_the_sum_of_chunks(db, monkeypatch) -> None:
@@ -181,6 +188,48 @@ def test_already_synthesized_chunks_are_skipped(db) -> None:
 
     assert sorted(tts.calls) == ["b", "d", "e"]
     assert _chunk_path(episode.id, 0).read_bytes() == b"kept"
+
+
+# --- voice resolution (D-58) -------------------------------------------------
+
+
+def _set_saved_voice(db, episode, speaker: str, voice_id: str) -> None:
+    prefs = episode.user.preferences
+    saved = dict(getattr(prefs, speaker))
+    saved["voice_id"] = voice_id
+    setattr(prefs, speaker, saved)
+    db.commit()
+
+
+def test_users_saved_voice_id_is_used_when_set(db) -> None:
+    episode = _voiced_episode(db)
+    _set_saved_voice(db, episode, "host_a", "user-voice-a")
+    tts = _TrackingTTS()
+
+    voice.run(episode, _adapters(tts), db)
+
+    assert tts.voices_seen[0] == {"host_a": "user-voice-a", "host_b": "test-voice-b"}
+
+
+def test_default_voice_is_used_when_preference_is_empty(db) -> None:
+    episode = _voiced_episode(db)  # host_a/host_b prefs have no voice_id (conftest)
+    tts = _TrackingTTS()
+
+    voice.run(episode, _adapters(tts), db)
+
+    assert tts.voices_seen[0] == {"host_a": "test-voice-a", "host_b": "test-voice-b"}
+
+
+def test_raises_clear_error_when_speaker_has_no_voice_id_at_all(db, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "default_voice_host_b", "")
+    episode = _voiced_episode(db)
+    tts = _TrackingTTS()
+
+    with pytest.raises(RuntimeError, match="host_b"):
+        voice.run(episode, _adapters(tts), db)
+
+    # No paid call was made for any chunk.
+    assert tts.calls == []
 
 
 def test_failed_chunk_keeps_finished_ones_and_reports_their_usage(db, monkeypatch) -> None:
@@ -250,26 +299,47 @@ def _real_adapter(monkeypatch, outcomes: list) -> tuple[ElevenLabsDialogueTTS, l
     return tts, attempts
 
 
+_VOICES = {"host_a": "va", "host_b": "vb"}
+
+
 def test_adapter_retries_429_then_succeeds(monkeypatch) -> None:
     tts, attempts = _real_adapter(
         monkeypatch, [ApiError(status_code=429, headers={"retry-after": "1"}), 12]
     )
-    audio, usage = tts.synthesize_chunk([Turn(speaker="host_a", text="hello there")], seed=1)
+    audio, usage = tts.synthesize_chunk(
+        [Turn(speaker="host_a", text="hello there")], seed=1, voices=_VOICES
+    )
     assert (audio, usage.units_in, len(attempts)) == (b"audio", 12, 2)
 
 
 def test_adapter_gives_up_after_max_attempts_on_5xx(monkeypatch) -> None:
     tts, attempts = _real_adapter(monkeypatch, [ApiError(status_code=503)] * 3)
     with pytest.raises(ApiError):
-        tts.synthesize_chunk([Turn(speaker="host_a", text="hi")], seed=1)
+        tts.synthesize_chunk([Turn(speaker="host_a", text="hi")], seed=1, voices=_VOICES)
     assert len(attempts) == 3
 
 
 def test_adapter_does_not_retry_auth_errors(monkeypatch) -> None:
     tts, attempts = _real_adapter(monkeypatch, [ApiError(status_code=401), 5])
     with pytest.raises(ApiError):
-        tts.synthesize_chunk([Turn(speaker="host_a", text="hi")], seed=1)
+        tts.synthesize_chunk([Turn(speaker="host_a", text="hi")], seed=1, voices=_VOICES)
     assert len(attempts) == 1
+
+
+def test_adapter_maps_each_turn_to_its_speakers_voice_id(monkeypatch) -> None:
+    tts, _attempts = _real_adapter(monkeypatch, [1])
+    seen_inputs = {}
+
+    def fake_convert(inputs, _seed):
+        seen_inputs["inputs"] = inputs
+        return b"audio", {"character-cost": "1"}
+
+    monkeypatch.setattr(tts, "_convert", fake_convert)
+    turns = [Turn(speaker="host_a", text="hi"), Turn(speaker="host_b", text="there")]
+
+    tts.synthesize_chunk(turns, seed=1, voices={"host_a": "voice-a", "host_b": "voice-b"})
+
+    assert [i["voice_id"] for i in seen_inputs["inputs"]] == ["voice-a", "voice-b"]
 
 
 def test_request_cap_is_shared_across_adapter_instances(monkeypatch) -> None:
@@ -299,7 +369,10 @@ def test_request_cap_is_shared_across_adapter_instances(monkeypatch) -> None:
 
     turns = [Turn(speaker="host_a", text="hi")]
     threads = [
-        threading.Thread(target=adapters[i % 2].synthesize_chunk, args=(turns, 1)) for i in range(6)
+        threading.Thread(
+            target=adapters[i % 2].synthesize_chunk, args=(turns, 1), kwargs={"voices": _VOICES}
+        )
+        for i in range(6)
     ]
     for t in threads:
         t.start()

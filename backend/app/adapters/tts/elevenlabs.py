@@ -13,7 +13,6 @@ from app.schemas import Turn, Usage
 
 logger = logging.getLogger(__name__)
 
-_VOICE_BY_SPEAKER = {"host_a": "default_voice_host_a", "host_b": "default_voice_host_b"}
 _BACKOFF_BASE_S = 2.0
 _MAX_RETRY_AFTER_S = 30.0
 
@@ -82,11 +81,10 @@ class ElevenLabsDialogueTTS:
         ) as resp:
             return b"".join(resp.data), resp.headers
 
-    def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]:
-        inputs = [
-            {"text": t.text, "voice_id": getattr(self._settings, _VOICE_BY_SPEAKER[t.speaker])}
-            for t in turns
-        ]
+    def synthesize_chunk(
+        self, turns: list[Turn], seed: int | None, voices: dict[str, str]
+    ) -> tuple[bytes, Usage]:
+        inputs = [{"text": t.text, "voice_id": voices[t.speaker]} for t in turns]
         # The SDK retries 429/5xx only on non-streaming calls; text_to_dialogue
         # streams, so without this loop one 429 would fail the whole stage.
         max_attempts = self._settings.elevenlabs_max_attempts

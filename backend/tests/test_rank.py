@@ -29,8 +29,26 @@ def test_recency_decay_halves_every_half_life() -> None:
     assert abs(recency_decay(_NOW - timedelta(days=6), _NOW) - 0.25) < 1e-9
 
 
-def test_recency_decay_treats_missing_date_as_fresh() -> None:
-    assert recency_decay(None, _NOW) == 1.0
+def test_recency_decay_treats_missing_date_as_one_half_life_old() -> None:
+    assert recency_decay(None, _NOW) == 0.5
+
+
+def test_dated_article_beats_equally_scored_undated_one() -> None:
+    # _candidate's `published_at=None` means "use the default fresh date," not
+    # "undated" -- build the undated one directly via the dataclass instead.
+    candidates = [
+        Candidate(
+            article_id=1,
+            topic="AI",
+            relevance=0.9,
+            newsworthy=0.9,
+            already_covered=False,
+            published_at=None,  # undated -> decay 0.5
+        ),
+        _candidate(2, "AI", published_at=_NOW),  # dated, same relevance/newsworthy -> decay 1.0
+    ]
+    selected = select_stories(candidates, target_minutes=6, now=_NOW)
+    assert [s.article_id for s in selected] == [2, 1]
 
 
 def test_story_count_floors_at_three() -> None:
