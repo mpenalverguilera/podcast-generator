@@ -35,7 +35,7 @@ python scripts/setup.py                        # one-shot bootstrap: installs uv
 docker compose up -d db                        # Postgres only (dev)
 cd backend && uv sync                          # install (also what scripts/setup.py runs)
 uv run alembic upgrade head                    # migrate
-uv run uvicorn app.main:app --reload           # API on :8000
+uv run uvicorn app.main:app --reload --reload-dir app   # API on :8000
 uv run python -m app.cli --help                # pipeline CLI (plan, fetch, generate, ...)
 LOG_LEVEL=DEBUG uv run python -m app.cli generate --user demo@example.com   # verbose terminal logs
 uv run pytest -q                               # tests (never hit real APIs)
