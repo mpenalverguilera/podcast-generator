@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _MIN_SCORE = 0.3
 _RECENCY_HALF_LIFE_DAYS = 3.0
+_UNDATED_DECAY = 0.5
 _MIN_STORY_COUNT = 3
 _MINUTES_PER_STORY = 1.2
 _CLASSIFY_CONCURRENCY = 8
@@ -47,11 +48,15 @@ class Selected:
 def recency_decay(
     published_at: datetime | None, now: datetime, half_life_days: float = _RECENCY_HALF_LIFE_DAYS
 ) -> float:
-    """1.0 for an undated article (fetch already keeps only in-window-or-undated
-    results, so "undated" isn't a signal of staleness here) or one published in
-    the future (clock skew); otherwise halves every `half_life_days`."""
+    """1.0 for an article published in the future (clock skew); otherwise
+    halves every `half_life_days`. An undated article gets `_UNDATED_DECAY`
+    (one half-life old): fetch.py deliberately keeps undated results in the
+    window, but an unknown publish date is a risk, not a signal of freshness,
+    so it shouldn't score as if published this second. 0.5 still lets a
+    strongly relevant undated article be selectable, but a dated, equally
+    relevant one will now outrank it."""
     if published_at is None:
-        return 1.0
+        return _UNDATED_DECAY
     age_days = (now - published_at).total_seconds() / 86400
     if age_days <= 0:
         return 1.0
