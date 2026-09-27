@@ -85,6 +85,29 @@ def test_check_sends_source_text_and_no_sources_note_to_the_model() -> None:
     assert "no sources" in llm.last_prompt.text  # the intro/outro sections
 
 
+def test_check_labels_context_sources_as_previous_story_only() -> None:
+    """D-62: a section's own sources are still what it's graded against;
+    context_ids adds the previous story's sources in a clearly separate,
+    clearly labeled block, so the checker can judge a bridge-in link without
+    treating it as license for a new fact."""
+    scripted = _clean_script("a1")
+    llm = _GroundingOnlyLLM(GroundingReport(unsupported=[]))
+
+    grounding.check(
+        scripted,
+        {"a1": "this section's own source", "a0": "the previous story's source"},
+        llm,
+        context_ids={1: ["a0"]},  # section 1 ("story") gets a0 as context
+    )
+
+    prompt = llm.last_prompt.text
+    assert "the previous story's source" in prompt
+    assert "not a source for this section's own new facts" in prompt
+    # The intro (section 0) got no context -- only section 1's own block does.
+    intro_block = prompt.split("Section 0 (", 1)[1].split("Section 1 (", 1)[0]
+    assert "not a source for this section's own new facts" not in intro_block
+
+
 def test_check_flags_a_planted_false_number_not_in_the_source() -> None:
     """Acceptance A: plant one false number in a copy of the script and prove
     the check flags it, using a fake/stub LLM (a real run is done separately

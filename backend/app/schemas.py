@@ -70,7 +70,9 @@ class Section(BaseModel):
 
 
 class OutlineSection(BaseModel):
-    """One planned story section (scripting v2, docs/DECISIONS.md D-59). The
+    """One planned story section (scripting v2, docs/DECISIONS.md D-59; D-62
+    renamed why_listener_cares -> stakes and target_words -> max_words -- the
+    latter is a ceiling the writer may undershoot, not a target to hit). The
     outline call writes these; code then overwrites story_id to match the
     episode_items rows, so the model's own story_id only needs to be unique."""
 
@@ -79,9 +81,9 @@ class OutlineSection(BaseModel):
     topic_label: str
     headline: str
     angle: str
-    why_listener_cares: str
+    stakes: str
     depth: Literal["headlines", "deep"]
-    target_words: int
+    max_words: int
     key_facts: list[str]
     must_not_cover: list[str]
     bridge_in: str | None = None
@@ -105,13 +107,19 @@ class SectionDraft(BaseModel):
     turns: list[Turn]
 
 
-class PolishedScript(BaseModel):
-    """Model output for the polish call. Not Script, so the model is never
-    asked to produce the outline or trace fields."""
+class FrameOutput(BaseModel):
+    """Model output for the frame call (D-62, replacing the old `polish` step
+    and its `PolishedScript`; D-63 dropped the AI-generated-briefing
+    disclosure line this once inserted between cold_open_turns and
+    preview_turns). The frame writes only the intro's cold open and preview
+    and the outro -- never the story sections, which pass through
+    untouched."""
 
     title: str
     summary: str
-    sections: list[Section]
+    cold_open_turns: list[Turn]
+    preview_turns: list[Turn]
+    outro_turns: list[Turn]
 
 
 class ScriptStep(BaseModel):

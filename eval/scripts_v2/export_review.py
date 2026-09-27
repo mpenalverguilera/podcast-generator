@@ -125,9 +125,9 @@ def build_review(episode_id: int) -> str:
             out += [
                 f"### {k}. {s.headline}",
                 f"- sources: {', '.join(s.source_ids)} · topic: {s.topic_label} · depth: "
-                f"{s.depth} · target: {s.target_words} words",
+                f"{s.depth} · max words: {s.max_words}",
                 f"- angle: {s.angle}",
-                f"- why the listener cares: {s.why_listener_cares}",
+                f"- stakes: {s.stakes}",
                 f"- bridge in: {s.bridge_in or '(first section)'}",
                 f"- key facts: {'; '.join(s.key_facts) or '-'}",
                 f"- must not cover: {'; '.join(s.must_not_cover) or '-'}",
@@ -154,13 +154,11 @@ def build_review(episode_id: int) -> str:
         if first or last:
             out.append(f"- section {i}: {len(first)} → {len(last)}")
             out += _flag_lines(last)
-    reverts = [t for t in script.trace if t.step == "revert"]
-    out.append(f"- polish reverts: {', '.join(f'section {t.section}' for t in reverts) or 'none'}")
 
     total, frame, story = word_budget(target_minutes)
     wpm = total / target_minutes
-    out += ["", "## Length", "", "| section | words | target |", "|---|---|---|"]
-    targets = {k + 1: s.target_words for k, s in enumerate(outline.sections)} if outline else {}
+    out += ["", "## Length", "", "| section | words | max |", "|---|---|---|"]
+    targets = {k + 1: s.max_words for k, s in enumerate(outline.sections)} if outline else {}
     for i, section in enumerate(script.sections):
         target = targets.get(i, "-")
         if section.kind == "intro" or section.kind == "outro":
