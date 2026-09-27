@@ -34,7 +34,9 @@ class FakeTTS:
 
     provider = "fake"
 
-    def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]:
+    def synthesize_chunk(
+        self, turns: list[Turn], seed: int | None, voices: dict[str, str]
+    ) -> tuple[bytes, Usage]:
         total_chars = sum(len(t.text) for t in turns)
         duration_s = total_chars / _CHARS_PER_SECOND
         audio = _silent_wav(duration_s)

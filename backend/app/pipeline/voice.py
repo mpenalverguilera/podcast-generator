@@ -110,8 +110,29 @@ def _write_atomic(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
+def _resolve_voices(episode: Episode, settings: Settings) -> dict[str, str]:
+    """The user's saved voice_id per host if set, else the .env default. D-58:
+    resolved once per episode (not per chunk or per adapter call) so a mid-run
+    preference change can't split one episode across two voices for the same
+    speaker."""
+    prefs = episode.user.preferences
+    defaults = {"host_a": settings.default_voice_host_a, "host_b": settings.default_voice_host_b}
+    voices: dict[str, str] = {}
+    for speaker, default in defaults.items():
+        saved = (getattr(prefs, speaker, None) or {}) if prefs else {}
+        voice_id = saved.get("voice_id") or default
+        if not voice_id:
+            raise RuntimeError(
+                f"no voice_id for {speaker}: set preferences.{speaker}.voice_id or "
+                f"DEFAULT_VOICE_{speaker.upper()} before voicing episode {episode.id}"
+            )
+        voices[speaker] = voice_id
+    return voices
+
+
 def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     settings = get_settings()
+    voices = _resolve_voices(episode, settings)
     script = Script.model_validate(episode.script)
     chunks = chunk_script(script)
 
@@ -149,7 +170,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
     def synthesize(i: int, turns: list[Turn]) -> Usage:
         # Runs on a worker thread: touches only the adapter and the file
         # system, never the DB session or the Episode object.
-        audio_bytes, usage = adapters.tts.synthesize_chunk(turns, seed=seed)
+        audio_bytes, usage = adapters.tts.synthesize_chunk(turns, seed=seed, voices=voices)
         _write_atomic(chunk_dir / f"{i}.{ext}", audio_bytes)
         return usage
 
