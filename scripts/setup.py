@@ -121,7 +121,10 @@ def ensure_env_file() -> None:
 def ensure_backend_env(uv: str) -> None:
     if not BACKEND.exists():
         sys.exit(f"{BACKEND} does not exist; nothing to sync.")
-    run([uv, "sync"], cwd=BACKEND)
+    # --link-mode=copy: uv's default (hardlink) fails on Windows when the repo lives inside a
+    # cloud-synced folder (OneDrive, etc.) -- "cloud operation cannot be performed on a file with
+    # incompatible hardlinks" (os error 396). Copying is a little slower but works everywhere.
+    run([uv, "sync", "--link-mode=copy"], cwd=BACKEND)
 
 
 def ensure_db() -> None:
