@@ -47,6 +47,7 @@ for yours, then make sure the daemon is running (`sudo systemctl start docker`).
    ```bash
    python scripts/setup.py
    ```
+   *Note:* It's recommended to run it in a plain PS terminal (when running it from VSCode fails due to a keyboard interrupt when creating the virtual environment)
 
 2. **Add real API keys** — open `.env` and fill in `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`,
    `EXA_API_KEY`. Not needed for steps 3-5 below, but required for anything that generates a
