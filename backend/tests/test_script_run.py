@@ -1,7 +1,8 @@
 """script.run() end to end with a stub LLM: outline -> sections with
-per-section grounding and patching -> polish with change detection and
-reverts. The stub answers from FakeLLM unless a test queues something, and
-its grounding check flags any turn containing the planted marker."""
+per-section grounding and patching -> frame (intro/outro only, with the
+disclosure line inserted by code). The stub answers from FakeLLM unless a
+test queues something, and its grounding check flags any turn containing the
+planted marker."""
 
 import json
 import math
@@ -15,11 +16,11 @@ from app.adapters.llm.fake import FakeLLM
 from app.config import get_settings
 from app.models import Article, ArticleScore, ContentSource, EpisodeItem, PipelineStep
 from app.pipeline import script
-from app.pipeline.script import ScriptingError, short_id
+from app.pipeline.script import ScriptingError, scale_max_words, short_id, word_budget
 from app.schemas import (
+    FrameOutput,
     GroundingReport,
     Outline,
-    PolishedScript,
     RenderedPrompt,
     SectionDraft,
     Turn,
@@ -34,11 +35,11 @@ _TURN_RE = re.compile(r"^  turn (\d+): (.*)$")
 
 
 class _StubLLM:
-    def __init__(self, *, outlines=(), sections=(), polish=None) -> None:
+    def __init__(self, *, outlines=(), sections=(), frame=None) -> None:
         self._fake = FakeLLM()
         self.outlines = list(outlines)
         self.sections = list(sections)
-        self.polish = polish  # callable(PolishedScript) -> PolishedScript
+        self.frame = frame  # callable(FrameOutput) -> FrameOutput
         self.calls: list[tuple[str, str]] = []
 
     def structured(self, prompt, schema, model, reasoning):
@@ -54,8 +55,8 @@ class _StubLLM:
             if queued is not None:
                 return queued, usage
         parsed, _ = self._fake.structured(prompt, schema, model, reasoning)
-        if schema is PolishedScript and self.polish:
-            parsed = self.polish(parsed)
+        if schema is FrameOutput and self.frame:
+            parsed = self.frame(parsed)
         return parsed, usage
 
     def prompts(self, schema_name: str) -> list[str]:
@@ -96,9 +97,13 @@ def _draft(total_words: int, marker: bool = False) -> SectionDraft:
     return SectionDraft(turns=turns)
 
 
-# make_user_with_episode's 3-minute episode: a 345-word story budget.
-_ONE_STORY = 345
-_TWO_STORIES = 172
+# make_user_with_episode's 3-minute episode: a 345-word story budget. FakeLLM's
+# outline fixture asks for 100 words per section; scale_max_words (D-62's 1.3x
+# scale-up cap) is what actually decides each section's ceiling, so the test
+# drafts are sized from that -- not the raw story budget -- to stay valid.
+_STORY_BUDGET = word_budget(3)[2]
+_ONE_STORY = scale_max_words([100], _STORY_BUDGET)[0]
+_TWO_STORIES = scale_max_words([100, 100], _STORY_BUDGET)[0]
 
 
 def _episode(db, n_articles: int = 2, focus: str | None = None, topics=None):
@@ -148,13 +153,28 @@ def test_run_writes_intro_stories_outro_with_outline_attached(db) -> None:
     assert set(episode.prompt_versions) >= {
         "outline",
         "section_writer",
-        "polish",
+        "frame",
         "grounding_check",
     }
-    # outline + 3 sections + polish on the scripting row; grounding on its own row.
+    # outline + 3 sections + frame on the scripting row; grounding on its own row.
     assert usage.cost_usd == pytest.approx(0.005)
     step = db.scalars(select(PipelineStep).where(PipelineStep.stage == "grounding")).one()
-    assert float(step.cost_usd) == pytest.approx(0.004)  # 3 sections + 1 polish check
+    assert float(step.cost_usd) == pytest.approx(0.004)  # 3 sections + 1 frame check
+
+
+def test_disclosure_line_is_inserted_by_code_and_never_sent_for_grounding(db) -> None:
+    episode, _ = _episode(db, 1)
+    llm = _StubLLM()
+    script.run(episode, _adapters(llm), db)
+
+    intro = episode.script["sections"][0]
+    assert any(t["text"] == "Quick note: this briefing is AI-generated." for t in intro["turns"])
+    # The prompt tells the model not to write this line itself...
+    frame_prompt = llm.prompts("FrameOutput")[0]
+    assert "Do not write a line about this being an AI-generated briefing" in frame_prompt
+    # ...and the fixed line is never sent to the grounder.
+    ground_prompt = llm.prompts("GroundingReport")[-1]
+    assert "Quick note: this briefing is AI-generated." not in ground_prompt
 
 
 def test_sections_are_written_sequentially_with_earlier_sections_visible(db) -> None:
@@ -165,6 +185,21 @@ def test_sections_are_written_sequentially_with_earlier_sections_visible(db) -> 
     first, second = llm.prompts("SectionDraft")
     assert "this is the first section" in first
     assert "Section 1:\nAlex: This is a fake sentence" in second
+
+
+def test_section_grounding_includes_previous_story_as_context(db) -> None:
+    episode, _ = _episode(db, 3)
+    llm = _StubLLM()
+    script.run(episode, _adapters(llm), db)
+
+    # The per-section context block (not the prompt's general explanation of
+    # the label, which is always present regardless of whether any section
+    # actually has one).
+    marker = "not a source for this section's own new facts"
+    grounds = llm.prompts("GroundingReport")
+    assert marker not in grounds[0]  # section 1 has no previous story
+    assert marker in grounds[1]
+    assert marker in grounds[2]
 
 
 def test_a_flagged_section_is_patched_and_regrounded(db) -> None:
@@ -183,7 +218,9 @@ def test_a_flagged_section_is_patched_and_regrounded(db) -> None:
     assert "- turn 1:" in patch_prompt  # ...and the flag
 
 
-def test_a_patch_that_does_not_help_keeps_the_draft_and_records_the_flag(db) -> None:
+def test_an_unchanged_patch_leaves_its_flag_as_residual(db) -> None:
+    """The patch call returns byte-identical text: nothing changed, so
+    nothing is re-checked, and the original flag survives as unfixed."""
     episode, _ = _episode(db, 1)
     llm = _StubLLM(sections=[_draft(_ONE_STORY, marker=True), _draft(_ONE_STORY, marker=True)])
 
@@ -193,35 +230,61 @@ def test_a_patch_that_does_not_help_keeps_the_draft_and_records_the_flag(db) -> 
     assert episode.grounding_flags_final == episode.grounding_flags_initial
 
 
-def test_polish_that_changes_facts_in_a_story_is_reverted(db) -> None:
-    episode, _ = _episode(db, 2)
+def test_a_patch_is_always_kept_even_if_the_recheck_still_flags_it(db) -> None:
+    """D-62: no draft-vs-patch flag-count comparison. A patch that changes
+    the flagged turn but is *still* imperfect is kept anyway -- unlike the
+    old behaviour (a 1-vs-1 tie kept the original, unpatched draft; see the
+    D-59 traces on episode 15710)."""
+    episode, _ = _episode(db, 1)
+    still_bad = _draft(_ONE_STORY, marker=True)
+    still_bad.turns[1] = Turn(
+        speaker=still_bad.turns[1].speaker,
+        text=f"Actually, revenue hit {_MARKER} dollars too, a different way of saying it.",
+    )
+    llm = _StubLLM(sections=[_draft(_ONE_STORY, marker=True), still_bad])
 
-    def sneak_in_a_fact(polished: PolishedScript) -> PolishedScript:
-        story = polished.sections[1]
-        story.turns[0] = Turn(speaker="host_a", text=f"And revenue hit {_MARKER}.")
-        return polished
-
-    llm = _StubLLM(polish=sneak_in_a_fact)
     script.run(episode, _adapters(llm), db)
 
-    assert _MARKER not in str(episode.script["sections"])
-    assert any(t["step"] == "revert" and t["section"] == 1 for t in episode.script["trace"])
-    # The reverted section is not counted as a final flag: its words are the draft's.
-    assert episode.grounding_flags_final == []
+    assert len(episode.grounding_flags_initial) == 1
+    assert len(episode.grounding_flags_final) == 1  # re-flagged, but the patch is kept regardless
+    assert _MARKER in str(episode.script["sections"])  # the (still imperfect) patch, not reverted
+    assert len(llm.prompts("SectionDraft")) == 2  # write + one patch -- no second patch
+
+
+def test_frame_prompt_never_receives_the_drafted_story_turns(db) -> None:
+    episode, _ = _episode(db, 2)
+    llm = _StubLLM()
+    script.run(episode, _adapters(llm), db)
+
+    frame_prompt = llm.prompts("FrameOutput")[0]
+    assert "This is a fake sentence for testing scripts" not in frame_prompt
+    assert '"cold_open_hook"' in frame_prompt  # the outline plan, not the written sections
+
+
+def test_frame_grounding_checks_only_intro_and_outro(db) -> None:
+    episode, _ = _episode(db, 2)
+    llm = _StubLLM()
+    script.run(episode, _adapters(llm), db)
+
+    frame_check = llm.prompts("GroundingReport")[-1]
+    assert frame_check.count("Section ") == 2  # intro, outro -- never the story sections
 
 
 def test_trace_writes_every_step_when_script_trace_dir_is_set(db, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(get_settings(), "script_trace_dir", tmp_path / "trace")
     episode, _ = _episode(db, 2)
 
-    def sneak_in_a_fact(polished: PolishedScript) -> PolishedScript:
-        polished.sections[2].turns[0] = Turn(speaker="host_a", text=f"And revenue hit {_MARKER}.")
-        return polished
+    def sneak_in_a_fact(frame_out: FrameOutput) -> FrameOutput:
+        frame_out.cold_open_turns[0] = Turn(
+            speaker="host_a", text=f"Cold open with revenue at {_MARKER}."
+        )
+        return frame_out
 
-    # s1 is flagged and patched clean; polish sneaks a fact into s2, which is reverted.
+    # s1 is flagged and patched clean; s2 is never flagged; the frame's cold
+    # open is flagged and patched too.
     llm = _StubLLM(
         sections=[_draft(_TWO_STORIES, marker=True), _draft(_TWO_STORIES)],
-        polish=sneak_in_a_fact,
+        frame=sneak_in_a_fact,
     )
     script.run(episode, _adapters(llm), db)
 
@@ -237,22 +300,25 @@ def test_trace_writes_every_step_when_script_trace_dir_is_set(db, tmp_path, monk
         "05_s1_regrounding.json",
         "02_s2_draft.md",
         "03_s2_grounding.json",
-        "06_polish.md",
-        "07_polish_grounding.json",
+        "06_frame.md",
+        "07_frame_grounding.json",
+        "07_intro_patched.md",
+        "07_intro_regrounding.json",
         "08_final.md",
         "calls.json",
     }
     assert expected <= files
     assert not any(f.startswith(("04_s2", "05_s2")) for f in files)  # s2 was never flagged
+    assert not any(f.startswith("07_outro") for f in files)  # outro was never flagged
 
     calls = json.loads((trace / "calls.json").read_text(encoding="utf-8"))
     prompts = sorted(f for f in files if f.startswith("prompts/"))
     assert len(calls) == len(prompts) == len(llm.calls)
     assert [c["step"] for c in calls][:4] == ["outline", "s1_write", "s1_ground", "s1_patch"]
 
-    polish_check = json.loads((trace / "07_polish_grounding.json").read_text(encoding="utf-8"))
-    assert [r["section"] for r in polish_check["reverted"]] == ["s2"]
-    assert "CHANGED" in (trace / "06_polish.md").read_text(encoding="utf-8")
+    frame_check = json.loads((trace / "07_frame_grounding.json").read_text(encoding="utf-8"))
+    assert any(f["section"] == "intro" for f in frame_check["flags"])
+    assert _MARKER not in (trace / "08_final.md").read_text(encoding="utf-8")
 
 
 def test_trace_writes_nothing_when_script_trace_dir_is_unset(db, tmp_path) -> None:
@@ -262,23 +328,6 @@ def test_trace_writes_nothing_when_script_trace_dir_is_unset(db, tmp_path) -> No
 
     assert episode.script is not None
     assert list(tmp_path.rglob("*")) == []  # tmp_path is also conftest's data_dir
-
-
-def test_polish_grounding_checks_only_changed_stories_plus_intro_and_outro(db) -> None:
-    episode, articles = _episode(db, 2)
-
-    def change_second_story(polished: PolishedScript) -> PolishedScript:
-        polished.sections[2].turns[0] = Turn(speaker="host_a", text="A new bridge line.")
-        polished.sections[1].turns[0].text = "[laughs] " + polished.sections[1].turns[0].text
-        return polished
-
-    llm = _StubLLM(polish=change_second_story)
-    script.run(episode, _adapters(llm), db)
-
-    polish_check = llm.prompts("GroundingReport")[-1]
-    assert "A new bridge line." in polish_check
-    assert "[laughs]" not in polish_check  # tag-only change isn't re-grounded
-    assert polish_check.count("Section ") == 3  # intro, story 2, outro
 
 
 def test_outline_retry_sees_the_previous_outline_and_errors(db) -> None:
@@ -305,6 +354,17 @@ def test_an_outline_invalid_twice_fails_with_the_spend_attached(db) -> None:
     assert excinfo.value.usage.cost_usd == pytest.approx(0.002)
 
 
+def test_outline_prompt_includes_today_window_start_and_stale_snippet(db) -> None:
+    episode, _ = _episode(db, 1)
+    llm = _StubLLM()
+    script.run(episode, _adapters(llm), db)
+
+    outline_prompt = llm.prompts("Outline")[0]
+    assert "Today is" in outline_prompt
+    assert "covers news since" in outline_prompt
+    assert "full text opens:" in outline_prompt
+
+
 def test_focus_is_rendered_as_the_listener_request_never_the_word_focus(db) -> None:
     episode, _ = _episode(db, 2, focus="open-weight models", topics=["general", "focus"])
     llm = _StubLLM()
@@ -314,7 +374,7 @@ def test_focus_is_rendered_as_the_listener_request_never_the_word_focus(db) -> N
     assert 'Listener\'s request for this episode: "open-weight models"' in outline_prompt
     assert "— focus —" not in outline_prompt
     assert "whose topic is the listener's request" in outline_prompt
-    assert "say the listener asked about this" in llm.prompts("PolishedScript")[0]
+    assert "the listener asked about this" in llm.prompts("FrameOutput")[0]
 
 
 def test_no_focus_section_means_no_you_asked_about(db) -> None:
@@ -323,7 +383,7 @@ def test_no_focus_section_means_no_you_asked_about(db) -> None:
     llm = _StubLLM()
     script.run(episode, _adapters(llm), db)
 
-    assert 'Do not say "you asked about..."' in llm.prompts("PolishedScript")[0]
+    assert 'Do not say "you asked about..."' in llm.prompts("FrameOutput")[0]
     assert "whose topic is the listener's request" not in llm.prompts("Outline")[0]
 
 
@@ -355,6 +415,7 @@ def test_outlet_domain_and_thin_sources_are_labelled_for_the_model(db) -> None:
     script.run(episode, _adapters(llm), db)
 
     outline_prompt = llm.prompts("Outline")[0]
-    assert "Outlet0 —" in outline_prompt and "www.outlet0.com" not in outline_prompt
+    # D-62: the raw domain, not a display name -- the model infers the name itself.
+    assert "www.outlet0.com —" in outline_prompt
     assert "highlights only" in outline_prompt
     assert "thin source" in llm.prompts("SectionDraft")[0]

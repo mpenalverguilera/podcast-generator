@@ -1,4 +1,3 @@
-import json
 import math
 import re
 import time
@@ -9,7 +8,6 @@ from app.schemas import RenderedPrompt, Usage
 
 _SHORT_ID_RE = re.compile(r"\[(a\d+)\]")
 _WORD_TARGET_RE = re.compile(r"about (\d+) words")
-_DRAFT_JSON_RE = re.compile(r"<draft_json>\s*(.*?)\s*</draft_json>", re.DOTALL)
 _FAKE_SENTENCE = "This is a fake sentence for testing scripts. "
 
 # Canned payloads keyed by schema class name, for schemas whose all-default
@@ -83,7 +81,7 @@ def _ids_in(prompt_text: str) -> list[str]:
 
 def _fake_outline(prompt_text: str) -> dict:
     """One section per `[aNN]` id in the outline prompt, story_ids s1.., each
-    asking for 100 words (script.py normalizes these to the story budget)."""
+    asking for 100 words (script.py scales these to the story budget)."""
     sections = [
         {
             "story_id": f"s{i + 1}",
@@ -91,9 +89,9 @@ def _fake_outline(prompt_text: str) -> dict:
             "topic_label": "fake topic",
             "headline": f"Fake headline {i + 1}",
             "angle": "a fake angle",
-            "why_listener_cares": "a fake reason",
+            "stakes": "a fake stake",
             "depth": "headlines",
-            "target_words": 100,
+            "max_words": 100,
             "key_facts": [f"fake fact {i + 1}"],
             "must_not_cover": [],
             "bridge_in": None if i == 0 else "a fake bridge",
@@ -119,30 +117,17 @@ def _fake_section(prompt_text: str) -> dict:
     }
 
 
-def _fake_polish(prompt_text: str) -> dict:
-    """Echoes the drafted story sections (the JSON between the <draft_json>
-    markers polish.v1.md puts them in) unchanged, with a fake intro/outro."""
-    match = _DRAFT_JSON_RE.search(prompt_text)
-    stories = json.loads(match.group(1)) if match else []
-    intro = {
-        "kind": "intro",
-        "story_id": None,
-        "source_ids": [],
-        "turns": [
-            {"speaker": "host_a", "text": _FAKE_SENTENCE * 2},
-            {"speaker": "host_b", "text": _FAKE_SENTENCE * 2},
-        ],
-    }
-    outro = {
-        "kind": "outro",
-        "story_id": None,
-        "source_ids": [],
-        "turns": [{"speaker": "host_b", "text": _FAKE_SENTENCE * 3}],
-    }
+def _fake_frame(prompt_text: str) -> dict:
+    """A fixed, valid frame shape: script.py never puts story turns in the
+    frame prompt (D-62), so there's nothing in the prompt to derive this
+    from -- unlike outline/section, which key off the `[aNN]` ids or the
+    word target actually rendered into their prompts."""
     return {
         "title": "Fake Episode",
         "summary": "A fake summary for testing.",
-        "sections": [intro, *stories, outro],
+        "cold_open_turns": [{"speaker": "host_a", "text": _FAKE_SENTENCE * 2}],
+        "preview_turns": [{"speaker": "host_b", "text": _FAKE_SENTENCE * 2}],
+        "outro_turns": [{"speaker": "host_b", "text": _FAKE_SENTENCE * 3}],
     }
 
 
@@ -150,7 +135,7 @@ def _fake_polish(prompt_text: str) -> dict:
 _FROM_PROMPT = {
     "Outline": _fake_outline,
     "SectionDraft": _fake_section,
-    "PolishedScript": _fake_polish,
+    "FrameOutput": _fake_frame,
 }
 
 

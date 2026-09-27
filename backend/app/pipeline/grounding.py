@@ -17,13 +17,22 @@ from app.schemas import GroundingReport, Script, UnsupportedClaim, Usage
 SOURCE_CHARS = 12000
 
 
-def _sections_block(script: Script, sources: dict[str, str]) -> str:
+def _sections_block(
+    script: Script, sources: dict[str, str], context_ids: dict[int, list[str]] | None = None
+) -> str:
     """One block per section, indexed exactly as script.sections/turns are
     indexed (so a flagged claim's section_index/turn_index can be located
     directly): its turns, and -- for a "story" section -- the full text of
     every article it cited, truncated per source so the prompt stays bounded.
     A section with no source_ids (intro/outro) is marked as having none, so
-    the model knows to flag any factual claim made there too."""
+    the model knows to flag any factual claim made there too.
+
+    `context_ids[si]` (D-62), when given, is the *previous* story's own
+    source ids: shown in a clearly separate, clearly labeled block so the
+    checker can judge whether this section's bridge_in link back to it is
+    accurate, without treating it as a valid source for this section's own
+    new facts (see grounding_check.v3.md)."""
+    context_ids = context_ids or {}
     blocks = []
     for si, section in enumerate(script.sections):
         turns = "\n".join(f"  turn {ti}: {t.text}" for ti, t in enumerate(section.turns))
@@ -33,17 +42,32 @@ def _sections_block(script: Script, sources: dict[str, str]) -> str:
                 f"[{sid}] {sources.get(sid, '(source text unavailable)')[:SOURCE_CHARS]}"
                 for sid in section.source_ids
             )
-            blocks.append(f"{header}\nSources:\n{sources_text}\nTurns:\n{turns}")
+            block = f"{header}\nSources:\n{sources_text}\nTurns:\n{turns}"
         else:
-            blocks.append(f"{header} -- no sources, flag any factual claim here\nTurns:\n{turns}")
+            block = f"{header} -- no sources, flag any factual claim here\nTurns:\n{turns}"
+        extra = context_ids.get(si)
+        if extra:
+            extra_text = "\n\n".join(
+                f"[{sid}] {sources.get(sid, '(source text unavailable)')[:SOURCE_CHARS]}"
+                for sid in extra
+            )
+            block += (
+                "\nPrevious story -- only to support a link back to it, not a source for this "
+                f"section's own new facts:\n{extra_text}"
+            )
+        blocks.append(block)
     return "\n\n".join(blocks)
 
 
 def check(
-    script: Script, sources: dict[str, str], llm: LLM, settings: Settings | None = None
+    script: Script,
+    sources: dict[str, str],
+    llm: LLM,
+    settings: Settings | None = None,
+    context_ids: dict[int, list[str]] | None = None,
 ) -> tuple[GroundingReport, Usage]:
     settings = settings or get_settings()
-    prompt = load_prompt("grounding_check", sections=_sections_block(script, sources))
+    prompt = load_prompt("grounding_check", sections=_sections_block(script, sources, context_ids))
     return llm.structured(
         prompt,
         GroundingReport,

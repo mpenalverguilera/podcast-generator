@@ -3,16 +3,18 @@ import re
 from app.models import ArticleScore, EpisodeItem
 from app.pipeline.script import (
     apply_outline_order,
-    changed_story_indices,
-    check_polish,
-    normalize_targets,
+    banned_phrase_hits,
+    changed_turn_indices,
+    floor_warning,
     only_word_count_errors,
     outlet_name,
     remap_flags,
+    remap_turn_subset,
     resolve_topics,
-    revert_flagged,
+    scale_max_words,
     short_id,
     strip_audio_tags,
+    validate_frame,
     validate_outline,
     validate_section,
     word_budget,
@@ -20,11 +22,9 @@ from app.pipeline.script import (
 from app.prompts import DEFAULT_PROMPTS_DIR
 from app.schemas import (
     DroppedSource,
+    FrameOutput,
     Outline,
     OutlineSection,
-    PolishedScript,
-    Script,
-    Section,
     Turn,
     UnsupportedClaim,
 )
@@ -37,29 +37,19 @@ def _turns(n: int, words_each: int = 10) -> list[Turn]:
     return [Turn(speaker=speakers[i % 2], text="word " * words_each) for i in range(n)]
 
 
-def _plan(story_id: str, source_ids: list[str], target_words: int = 100) -> OutlineSection:
+def _plan(story_id: str, source_ids: list[str], max_words: int = 100) -> OutlineSection:
     return OutlineSection(
         story_id=story_id,
         source_ids=source_ids,
         topic_label="t",
         headline="h",
         angle="a",
-        why_listener_cares="w",
+        stakes="w",
         depth="headlines",
-        target_words=target_words,
+        max_words=max_words,
         key_facts=[],
         must_not_cover=[],
         bridge_in=None,
-    )
-
-
-def _story(story_id: str, source_ids: list[str], texts: list[str]) -> Section:
-    speakers = ["host_a", "host_b"]
-    return Section(
-        kind="story",
-        story_id=story_id,
-        source_ids=source_ids,
-        turns=[Turn(speaker=speakers[i % 2], text=t) for i, t in enumerate(texts)],
     )
 
 
@@ -72,14 +62,19 @@ def test_word_budget_uses_135_wpm_and_a_12_percent_frame_with_a_floor() -> None:
     assert word_budget(3) == (405, 60, 345)
 
 
-def test_normalize_targets_keeps_proportions_and_sums_to_the_budget() -> None:
-    targets = normalize_targets([100, 300, 100], 1000)
-    assert targets == [200, 600, 200]
-    assert abs(sum(normalize_targets([120, 250, 90, 80], 713)) - 713) <= 2
+def test_scale_max_words_caps_scaling_up_at_1_3x() -> None:
+    # sum=150, budget=1000 -> factor would be 6.67x uncapped; capped at 1.3x.
+    assert scale_max_words([100, 50], 1000) == [130, 65]
 
 
-def test_normalize_targets_survives_zero_or_negative_targets() -> None:
-    assert normalize_targets([0, 0], 300) == [150, 150]
+def test_scale_max_words_scales_down_without_limit() -> None:
+    # sum=1000, budget=100 -> factor 0.1x, uncapped.
+    assert scale_max_words([600, 400], 100) == [60, 40]
+
+
+def test_scale_max_words_survives_zero_or_negative_inputs() -> None:
+    # weights floor at 1, so the 1.3x scale-up cap applies here too.
+    assert scale_max_words([0, 0], 300) == [1, 1]
 
 
 # --- outlet names ---
@@ -154,10 +149,18 @@ def test_validate_section_flags_structure_problems() -> None:
     assert any("speaker name" in e for e in validate_section(prefixed, _NAMES, None))
 
 
-def test_validate_section_word_count_error_is_distinguishable() -> None:
-    errors = validate_section(_turns(3, 10), _NAMES, 100)  # 30 words vs 75-125
+def test_validate_section_only_over_max_by_more_than_10_percent_is_an_error() -> None:
+    # max_words=100: up to 110 is fine, 111+ is an error; under 50 is never an error here.
+    assert validate_section(_turns(4, 27), _NAMES, 100) == []  # 108 words, +8%: fine
+    errors = validate_section(_turns(4, 28), _NAMES, 100)  # 112 words, +12%: over
     assert only_word_count_errors(errors)
-    assert not only_word_count_errors(validate_section(_turns(2, 10), _NAMES, 100))
+    assert validate_section(_turns(3, 2), _NAMES, 100) == []  # 6 words, well under half: no error
+
+
+def test_floor_warning_only_fires_under_half_the_ceiling() -> None:
+    assert floor_warning(60, 100) is None
+    assert floor_warning(49, 100) is not None
+    assert floor_warning(10, None) is None
 
 
 def test_validate_section_ignores_audio_tags_in_word_count() -> None:
@@ -170,53 +173,105 @@ def test_validate_section_for_intro_skips_story_rules() -> None:
     assert validate_section(intro, _NAMES, None, is_story=False) == []
 
 
-# --- polish checks ---
-
-
-def _polished(sections: list[Section]) -> PolishedScript:
-    return PolishedScript(title="t", summary="s", sections=sections)
-
-
-def _frame(kind: str) -> Section:
-    return Section(kind=kind, turns=[Turn(speaker="host_a", text="Hello there.")])
-
-
-def test_check_polish_accepts_same_stories_between_intro_and_outro() -> None:
-    drafts = [_story("s1", ["a1"], ["x", "y", "z"]), _story("s2", ["a2"], ["x", "y", "z"])]
-    polished = _polished([_frame("intro"), *drafts, _frame("outro")])
-    assert check_polish(polished, drafts) == ([], True)
-
-
-def test_check_polish_flags_missing_frame_and_reordered_stories() -> None:
-    drafts = [_story("s1", ["a1"], ["x", "y", "z"]), _story("s2", ["a2"], ["x", "y", "z"])]
-    frame_errors, stories_ok = check_polish(_polished([drafts[1], drafts[0]]), drafts)
-    assert any("intro" in e for e in frame_errors)
-    assert any("outro" in e for e in frame_errors)
-    assert stories_ok is False
-
-    _, stories_ok = check_polish(
-        _polished([_frame("intro"), drafts[1], drafts[0], _frame("outro")]), drafts
+def test_banned_phrase_hits_flags_narrated_personalization() -> None:
+    assert banned_phrase_hits("If you follow the AI space, this matters.") == ["if you follow"]
+    assert banned_phrase_hits("A totally normal sentence.") == []
+    # Multiple phrases in one turn are all reported.
+    hits = banned_phrase_hits(
+        "For anyone following this, it'll be interesting to see what happens."
     )
-    assert stories_ok is False
+    assert set(hits) == {"for anyone following", "it'll be interesting to see"}
 
 
-def test_changed_story_indices_ignores_added_audio_tags() -> None:
-    drafts = [
-        _story("s1", ["a1"], ["One.", "Two.", "Three."]),
-        _story("s2", ["a2"], ["Four.", "Five.", "Six."]),
-    ]
-    polished = [
-        _story("s1", ["a1"], ["[laughs] One.", "Two.", "Three."]),  # tags only
-        _story("s2", ["a2"], ["Four, and a new bridge.", "Five.", "Six."]),  # words changed
-    ]
-    assert changed_story_indices(drafts, polished) == [1]
+def test_banned_phrase_hits_can_exclude_one_phrase() -> None:
+    assert banned_phrase_hits("You asked about this.", exclude=frozenset({"you asked about"})) == []
 
 
-def test_revert_flagged_puts_back_only_the_flagged_drafts() -> None:
-    drafts = [_story("s1", ["a1"], ["d1"]), _story("s2", ["a2"], ["d2"])]
-    polished = [_story("s1", ["a1"], ["p1"]), _story("s2", ["a2"], ["p2"])]
-    result = revert_flagged(polished, drafts, {1})
-    assert [s.turns[0].text for s in result] == ["p1", "d2"]
+def test_validate_section_rejects_banned_phrases_in_a_story() -> None:
+    turns = [*_turns(2, 10), Turn(speaker="host_b", text="As you asked, here's the update.")]
+    assert any("banned phrase" in e for e in validate_section(turns, _NAMES, None))
+
+
+def test_validate_section_allows_you_asked_about_only_for_non_story_sections() -> None:
+    story_turns = [*_turns(2, 10), Turn(speaker="host_b", text="You asked about this.")]
+    assert any("banned phrase" in e for e in validate_section(story_turns, _NAMES, None))
+    frame_turns = [Turn(speaker="host_a", text="You asked about this.")]
+    assert validate_section(frame_turns, _NAMES, None, is_story=False) == []
+
+
+# --- frame validation ---
+
+
+def _frame(cold_open: int = 1, preview: int = 1, outro: int = 1, asked: int = 0) -> FrameOutput:
+    asked_text = " ".join(["You asked about this."] * asked)
+    return FrameOutput(
+        title="t",
+        summary="s",
+        cold_open_turns=[
+            Turn(
+                speaker="host_a",
+                text=(f"Cold open {i}. {asked_text}" if i == 0 else f"Cold open {i}."),
+            )
+            for i in range(cold_open)
+        ],
+        preview_turns=[Turn(speaker="host_b", text=f"Preview {i}.") for i in range(preview)],
+        outro_turns=[Turn(speaker="host_b", text=f"Outro {i}.") for i in range(outro)],
+    )
+
+
+def test_validate_frame_accepts_a_good_frame() -> None:
+    assert validate_frame(_frame(), _NAMES, has_focus_section=False) == []
+
+
+def test_validate_frame_flags_turn_count_shape() -> None:
+    assert any("cold_open_turns" in e for e in validate_frame(_frame(cold_open=3), _NAMES, False))
+    assert any("preview_turns" in e for e in validate_frame(_frame(preview=0), _NAMES, False))
+    assert any("outro_turns" in e for e in validate_frame(_frame(outro=3), _NAMES, False))
+
+
+def test_validate_frame_you_asked_about_needs_a_focus_section_and_at_most_once() -> None:
+    assert any(
+        "you asked about" in e
+        for e in validate_frame(_frame(asked=1), _NAMES, has_focus_section=False)
+    )
+    assert validate_frame(_frame(asked=1), _NAMES, has_focus_section=True) == []
+    assert any(
+        "you asked about" in e
+        for e in validate_frame(_frame(asked=2), _NAMES, has_focus_section=True)
+    )
+
+
+# --- patch / re-check machinery ---
+
+
+def test_changed_turn_indices_finds_only_the_turns_that_actually_changed() -> None:
+    before = [Turn(speaker="host_a", text=f"turn {i}") for i in range(3)]
+    after = [before[0], Turn(speaker="host_a", text="turn 1 fixed"), before[2]]
+    assert changed_turn_indices(before, after) == [1]
+
+
+def test_changed_turn_indices_ignores_audio_tag_only_changes() -> None:
+    before = [Turn(speaker="host_a", text="turn 0")]
+    after = [Turn(speaker="host_a", text="[laughs] turn 0")]
+    assert changed_turn_indices(before, after) == []
+
+
+def test_changed_turn_indices_treats_a_turn_count_change_as_all_changed() -> None:
+    before = [Turn(speaker="host_a", text="a"), Turn(speaker="host_b", text="b")]
+    after = [Turn(speaker="host_a", text="a")]
+    assert changed_turn_indices(before, after) == [0]
+
+
+def test_remap_turn_subset_maps_local_indices_back_to_the_real_turns() -> None:
+    def claim(ti: int) -> UnsupportedClaim:
+        return UnsupportedClaim(
+            section_index=0, turn_index=ti, claim="c", reason="r", suggested_fix="f"
+        )
+
+    # A re-check of turns [1, 3] of some section: local 0 -> real 1, local 1 -> real 3.
+    mapped = remap_turn_subset([claim(0), claim(1), claim(9)], final_index=2, turn_ids=[1, 3])
+    assert [c.section_index for c in mapped] == [2, 2, 2]
+    assert [c.turn_index for c in mapped] == [1, 3, 1]  # out-of-range pinned to the first
 
 
 def test_remap_flags_maps_local_indices_to_final_script_indices() -> None:
@@ -225,9 +280,9 @@ def test_remap_flags_maps_local_indices_to_final_script_indices() -> None:
             section_index=i, turn_index=0, claim="c", reason="r", suggested_fix="f"
         )
 
-    # A polish check of [intro, story 2, outro] in a 3-story episode.
-    mapped = remap_flags([claim(0), claim(1), claim(2), claim(7)], [0, 2, 4])
-    assert [c.section_index for c in mapped] == [0, 2, 4, 0]
+    # A frame check of [intro, outro] in a 3-story episode.
+    mapped = remap_flags([claim(0), claim(1), claim(7)], [0, 4])
+    assert [c.section_index for c in mapped] == [0, 4, 0]
     # A one-section check of story 3: whatever the model says, it's section 3.
     assert remap_flags([claim(0)], [3])[0].section_index == 3
 
@@ -269,6 +324,8 @@ def test_resolve_topics_takes_the_best_score_but_the_best_focus_row_is_the_focus
 
 
 def test_a_v1_script_without_outline_still_validates() -> None:
+    from app.schemas import Script
+
     v1 = {
         "title": "Old episode",
         "summary": "From before scripting v2.",
@@ -295,7 +352,7 @@ def test_grounding_policy_text_is_identical_in_writer_patch_and_grounding_prompt
         return match.group(0)
 
     blocks = {
-        policy(n) for n in ("section_writer.v1.md", "section_patch.v1.md", "grounding_check.v2.md")
+        policy(n) for n in ("section_writer.v2.md", "section_patch.v2.md", "grounding_check.v3.md")
     }
     assert len(blocks) == 1
 
