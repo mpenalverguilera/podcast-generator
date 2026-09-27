@@ -18,7 +18,13 @@ class OpenAILLM:
         settings = settings or get_settings()
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set; cannot construct OpenAILLM")
-        self._client = OpenAI(api_key=settings.openai_api_key.get_secret_value())
+        # D-61: a bounded timeout and one SDK retry, instead of the SDK's 10-minute default
+        # timeout and 2 retries, so one hung call can't stall a stage for half an hour.
+        self._client = OpenAI(
+            api_key=settings.openai_api_key.get_secret_value(),
+            timeout=settings.openai_timeout_s,
+            max_retries=1,
+        )
 
     def structured(
         self, prompt: RenderedPrompt, schema: type[BaseModel], model: str, reasoning: str

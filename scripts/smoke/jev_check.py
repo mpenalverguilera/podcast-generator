@@ -15,7 +15,7 @@ Run (from repo root): uv run --project backend python scripts/smoke/jev_check.py
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.adapters.classifier.jev import JevClassifier
 from app.models import Article
@@ -55,7 +55,9 @@ def main() -> int:
 
     classifier = JevClassifier()
     for article in (on_topic, listicle):
-        result, usage = classifier.score(article, profile, "Space launches", [])
+        result, usage = classifier.score(
+            article, profile, "Space launches", [], datetime.now(UTC) - timedelta(days=7)
+        )
         print(f"{article.title!r}")
         print(
             f"  relevance={result.relevance:.3f} newsworthy={result.newsworthy:.3f} "

@@ -34,3 +34,6 @@ Luna-vs-Luna rerun keep-gate disagreement (noise floor): 3/60
 | availability | 0.862 | 0.05 | no |
 
 Bootstrap 95% CI on keep-gate AUC gap (informational, not gating): +0.089 [+0.000, +0.214]
+## D-61 update
+
+classifier.v2 (dates + `is_stale`) was measured across Sol/Luna and reasoning levels in [`classifier_v2_grid.md`](classifier_v2_grid.md); the fact-checker reasoning test is in [`grounding_noise.md`](grounding_noise.md). Default stays Sol with no reasoning (docs/DECISIONS.md D-61).

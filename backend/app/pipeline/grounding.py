@@ -9,9 +9,12 @@ the extra `pipeline_steps` row (docs/DECISIONS.md D-30)."""
 from app.adapters.llm.protocol import LLM
 from app.config import Settings, get_settings
 from app.prompts import load_prompt
-from app.schemas import GroundingReport, Script, Usage
+from app.schemas import GroundingReport, Script, UnsupportedClaim, Usage
 
-_MAX_SOURCE_CHARS = 4000
+# One limit for what the section writer sees and what the grounder checks
+# against, so a true fact from an article's tail isn't flagged just because
+# the grounder was shown less of the source (docs/DECISIONS.md D-59).
+SOURCE_CHARS = 12000
 
 
 def _sections_block(script: Script, sources: dict[str, str]) -> str:
@@ -27,7 +30,7 @@ def _sections_block(script: Script, sources: dict[str, str]) -> str:
         header = f"Section {si} ({section.kind}, story_id={section.story_id!r})"
         if section.source_ids:
             sources_text = "\n\n".join(
-                f"[{sid}] {sources.get(sid, '(source text unavailable)')[:_MAX_SOURCE_CHARS]}"
+                f"[{sid}] {sources.get(sid, '(source text unavailable)')[:SOURCE_CHARS]}"
                 for sid in section.source_ids
             )
             blocks.append(f"{header}\nSources:\n{sources_text}\nTurns:\n{turns}")
@@ -49,21 +52,19 @@ def check(
     )
 
 
-def format_issues(report: GroundingReport) -> str:
-    """Renders a GroundingReport as the block appended to the script_writer
-    prompt for the one allowed revision pass (script.py), the same shape as
-    script.py's own validation-error retry text."""
+def format_issues(claims: list[UnsupportedClaim]) -> str:
+    """Renders one section's flagged claims for the section_patch prompt.
+    Only the turn index is shown: a patch call always sees one section."""
     return "\n".join(
-        f'- section {c.section_index} turn {c.turn_index}: "{c.claim}" -- {c.reason}. '
-        f"Suggested fix: {c.suggested_fix}"
-        for c in report.unsupported
+        f'- turn {c.turn_index}: "{c.claim}" -- {c.reason}. Suggested fix: {c.suggested_fix}'
+        for c in claims
     )
 
 
 def sum_usage(usages: list[Usage]) -> Usage:
-    """Sums a sequence of grounding-check call Usages into the one
-    `pipeline_steps` row script.py writes for the grounding sub-step. Calls
-    are sequential (initial check, then an optional re-check), unlike rank.py's
+    """Sums sequential LLM call Usages into one: the grounding sub-step's own
+    `pipeline_steps` row, and the scripting stage's returned Usage (outline +
+    section writes + patches + polish). Calls are sequential, unlike rank.py's
     concurrent classification, so latency sums rather than maxes."""
     first = usages[0]
     return Usage(

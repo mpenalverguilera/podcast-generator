@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.adapters.classifier.protocol import Classifier
@@ -33,9 +34,10 @@ class FallbackClassifier:
         profile: InterestProfile,
         topic: str,
         recent_headlines: list[str],
+        window_start: datetime,
     ) -> tuple[ArticleScoreResult, Usage]:
         try:
-            return self._primary.score(article, profile, topic, recent_headlines)
+            return self._primary.score(article, profile, topic, recent_headlines, window_start)
         except Exception:
             logger.warning(
                 "primary classifier failed for article %s topic %r, falling back",
@@ -43,5 +45,7 @@ class FallbackClassifier:
                 topic,
                 exc_info=True,
             )
-            result, usage = self._fallback.score(article, profile, topic, recent_headlines)
+            result, usage = self._fallback.score(
+                article, profile, topic, recent_headlines, window_start
+            )
             return result, usage.model_copy(update={"fallback_count": 1})

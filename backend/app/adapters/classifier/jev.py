@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING
 
@@ -255,7 +256,11 @@ class JevClassifier:
         profile: InterestProfile,
         topic: str,
         recent_headlines: list[str],
+        window_start: datetime,
     ) -> tuple[ArticleScoreResult, Usage]:
+        # `window_start` is accepted for the protocol and ignored: jev.v2 has no staleness
+        # question, so Jev always returns is_stale=False (D-61) -- a stale story is only caught
+        # when the OpenAI classifier scores it (the default, or Jev's per-article fallback).
         payload = _build_request(
             self._settings.model_jev, article, profile, topic, recent_headlines
         )

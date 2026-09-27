@@ -666,3 +666,141 @@ Consequences: an undated article can still be selected (0.5 decay keeps it above
 **Known gap, left as-is.** Voicing resumes by skipping any chunk file already on disk (D-56), keyed only on `{episode_id}/{i}.{ext}` -- it does not know or record which voice mapping produced that file. If a user changes their host voice in settings between a failed voicing attempt and its retry, the retry resolves the *new* mapping but only sends the chunks still missing; chunks already on disk keep the *old* voice, so one episode's audio can end up mixing two voices for the same host. Judged acceptable for now: it needs a failed voicing attempt *and* a settings change in the narrow window before the retry, existing resume logic already has no versioning concept at all (D-56 didn't add one, and neither did anything before it), and the fix -- tagging each chunk file with the voice ids it was rendered with, and invalidating/re-voicing on mismatch -- is a real feature, not a one-line change, so it's deferred rather than built speculatively here.
 **Alternatives.** Looking up the voice mapping inside the adapter itself (settings + a DB/session handle passed in) -- rejected: it would need the adapter to reach into `Preferences` and break the adapter/pipeline boundary CLAUDE.md draws (adapters know providers, pipeline code knows the domain); resolving once in `voice.run` and passing plain data down keeps the adapter provider-only and trivially testable with a fixed dict. Re-resolving voices per chunk instead of once per episode -- rejected: doesn't fix the resume gap above (chunks already on disk are still stale either way) and adds a settings/DB read per chunk for no benefit, since nothing changes mid-run in practice outside the resume window.
 **Consequences.** `backend/tests/conftest.py`'s shared test-provider overrides now also force `DEFAULT_VOICE_HOST_A/B` to fixed test values, alongside the existing forced provider env vars -- otherwise every other test file that voices an episode through `make_user_with_episode`'s bare preferences (no `voice_id`) would hit the new "no voice id at all" error now that an empty default is no longer silently tolerated. 18 tests in `test_voice.py` (14 existing + 4 new: user voice used when set, default used when preference is empty, clear error when neither exists, adapter maps each turn to its own speaker's voice id) plus the full suite (198, up from D-56's 194) pass; ruff clean.
+
+## D-59 — Scripting v2: outline → sequential grounded sections → polish (2026-09-26, phase 10)
+**Context.** Scripting v1 was one call, all articles in and the full script out. Reading the code showed these blind spots:
+- The writer never saw why an article was picked: its topic, the listener's topic description, include/exclude, depth, or the avoid list.
+- Validation and grounding retries resent the prompt *without* the failed draft, so a "fix" was a blind reroll that could add new unsupported claims.
+- The writer saw 6,000 characters per source but the grounder only 4,000, so true facts from the tail got flagged.
+- The word budget ignored the story count and used 150 wpm, but D-28 measured about 136 (973 words → 428 s).
+- The intro said "you asked about X" even when no focus article was selected.
+- Highlights-only sources looked like full articles.
+- Outlets were read out as domains (`www.reuters.com`), and the literal topic `"focus"` leaked into prompts.
+
+**Decision.** Everything stays inside the existing SCRIPTING stage. There is no new stage, status or migration, and `episode.script` is still a `Script` that `voice.py` and the transcript API read unchanged.
+1. **Outline** (`outline.v1`, one `MODEL_SCRIPT` call). It sees every source as `[aNN] Outlet — date — title — topic — depth — full text | highlights only` plus highlights, all topic profiles, the avoid list, the focus request, recent headlines and the story budget. It returns order, angle, why-the-listener-cares, key facts, must-not-cover, a bridge and target words per section, and it may merge duplicate coverage or drop no-news sources. `validate_outline` (pure) checks that every selected id appears exactly once across sections ∪ dropped, that story ids are unique and that there is at least one section. On failure there is one retry that shows the previous outline JSON and the errors; a second failure fails the stage. Code then rescales `target_words` to the story budget and reorders `episode_items`: positions follow the outline, dropped items go last, and merged sources share a `story_id`, so the sources list follows the audio.
+2. **Sections** (`section_writer.v1`), **sequential**. Each call sees:
+   - the whole outline, with its own entry highlighted;
+   - the full text of *only its own sources*. Writer and grounder share one limit, `grounding.SOURCE_CHARS = 12000`, applied once to the same header + body text;
+   - the listener's profile for that topic, and the avoid list;
+   - the sections already written.
+
+   `validate_section` (pure) requires ≥3 turns, both hosts, no turn over 600 characters, no `Name:` prefix, and words within ±25% of target. A failure gets one patch call; a length-only failure after that is accepted with a warning, anything else fails the stage. Each section is then grounded against its own sources (`grounding_check.v2`). If anything is flagged, one **patch** (`section_patch.v1`) sees the draft, the flags with their suggested fixes and the sources, and is told to change only what's needed. After one re-check, the version with fewer flags wins; the rest are recorded.
+3. **Polish** (`polish.v1`) writes the intro and the outro:
+   - intro: a cold open, one "AI-generated briefing" line, a preview, no host self-introductions, and "you asked about X" only if a focus section exists;
+   - outro: at most 2 turns.
+
+   It may rewrite only the first and last two turns of each story section, and may add audio tags. Code checks the result:
+   - The intro and outro must be present: one retry, then the stage fails.
+   - If the story sections don't keep the same story_ids and source_ids in the same order, all drafts are kept.
+   - Only story sections whose words changed (tags stripped) are grounded, in one call together with the intro and outro, which are checked against all selected sources.
+   - A changed story section with any flag is **reverted** to its grounded draft.
+   - A flagged intro or outro gets one patch.
+
+**Why sequential, not parallel.**
+- Cost is about the same (±10%, same token volume).
+- Coherence is better: each section knows what came before, so there's less repetition and the bridges are real.
+- Polish has less to repair.
+- It's simpler: no thread pool, and a deterministic order.
+
+`write_section(..., prior_sections, ...)` is the seam: a parallel variant would pass `[]` for every section and map over a thread pool. Not built.
+
+**Grounding policy for host inferences.** The same text appears in the writer, patch and grounding prompts, and a unit test enforces it. Every number, name, date, quote and event must come from the section's sources. Hosts may connect stories and reason about implications when it's clearly framed as their own take ("my guess is…") and introduces no new fact. Without this, the grounder flags the connective tissue that makes a two-host dialogue worth listening to.
+
+**Word budget.** 135 wpm, from D-28's measurement. The frame (intro + outro) is `max(60, 12% of total)`. The total is only *warned* on outside ±20%, not failed: per-section budgets already bound it, and failing a whole paid stage over an 8% overshoot would be worse for the listener than a slightly long episode.
+
+**Deviations from the phase spec.**
+- (a) Story ids are renumbered `s1..sN` in outline order instead of copying the first source's `EpisodeItem.story_id`. After a rescript that merged sources, copying could give two sections the same id; renumbering can't, and `EpisodeItem.story_id` still equals the section's id for every source.
+- (b) The focus story. The spec said to take each article's highest-scoring `ArticleScore` row, but in the first real run the focus article's `focus` row tied (0.638) with its profile-topic row and lost the tie, so the intro didn't say "you asked about…". `resolve_topics` now makes the selected article with the best `focus` score the focus story, which is exactly the article rank.py puts in its focus slot. Found in run 1, fixed, then rescripted.
+- (c) `Script` also gets `trace: list[ScriptStep]` (step, section, words, flags, cost, latency, note), so the review export can show per-sub-step cost without new DB rows or a migration. It's never part of a model's output schema (polish returns `PolishedScript`).
+- (d) `metrics.fetch_rated_sessions` labels v2 episodes `sections-v<N>` (from `section_writer`). They have no `script_writer` key and would otherwise land in the dashboard's unknown bucket.
+- (e) `grounding.format_issues` now takes one section's claims and prints only turn indices, since a patch always sees one section.
+- (f) A scripting failure raises `ScriptingError` carrying the usage already spent, so the failed row still counts toward the daily cap (the D-56 mechanism).
+
+**`rescript <id> [--force]`** (CLI) re-runs only scripting on cached articles and stops before voicing. It accepts an episode paused after scripting or failed at scripting or later, and a ready one only with `--force` (the audio is cleared). It also deletes `data/chunks/<id>`, because `voice.py` skips chunks that already exist and would otherwise stitch the old script's audio into the new episode.
+
+**Measured in 3 real runs** (stop after scripting, no TTS; review files in `eval/scripts_v2/episode_<id>.md`):
+
+| episode | user / minutes | sections (sources) | words vs budget | flags initial → final | polish reverts | scripting $ / s | grounding $ / s |
+|---|---|---|---|---|---|---|---|
+| 15708 (after rescript) | AI, 6, focus | 5 (5) | 883 / 810 (+9%) | 5 → 0 | 0 | 0.175 / 131 | 0.005 / 37 |
+| 15709 | markets, 8 | 5 (7; 3 tennis merged) | 1160 / 1080 (+7%) | 7 → 2 | 3 | 0.216 / 144 | 0.008 / 387* |
+| 15710 | general, 4 | 2 (3; 2 F1 merged) | 621 / 540 (+15%) | 1 → 0 | 0 | 0.097 / 82 | 0.003 / 13 |
+
+- v1 cost $0.03–0.08 and took 27–74 s per episode. v2 costs about 2.5–3× more (still under $0.25) and takes about 1.5–2.5 min.
+- *One polish-grounding call in 15709 took 342 s. It was a `gpt-6-luna` call over the intro + outro against all 7 sources (about 84k characters). A single outlier, not reproduced.
+- Run 1's first pass, before the focus fix, is also in its review file's stage rows: $0.167, 117 s, flags 5 → 1, one revert.
+
+**Alternatives.**
+- Parallel sections: see above.
+- A polish that returns only the intro/outro. Rejected: the seams between stories are where v1 sounded most like a list, and letting polish touch them is safe because changed sections are re-grounded and reverted if flagged.
+- A separate `outlining` pipeline stage/status. Rejected: it needs a migration and a runner change for no user-visible benefit.
+
+**Consequences / what's left.**
+1. Every run lands 7–15% over budget: sections run about 10% over their targets. The next knob is aiming the writer about 5% under, or 130 wpm, but that should be checked against real TTS durations first.
+2. Polish reverted 3 of 5 sections in the markets episode, which throws away its seams there. A stricter polish prompt about bridge wording could help.
+3. Selection, not scripting:
+   - the markets episode had no central-bank story, so there was no rates ↔ AI-trading bridge to make;
+   - the general episode had no climate story;
+   - the Bundesliga article looks like an old story ("ten rounds left" in September), the D-28 stale-date problem that the recency work owns.
+4. Outlet names for concatenated domains read badly (`Techcompanynews`, `Mlwires`). The writer mostly used the article's own spelling, but an override list or Exa page metadata would fix it.
+5. **Concurrency hazard seen during the runs.** While the CLI was scripting episode 15710, another process running main's code marked it `interrupted`, resumed it with the v1 scripter and **voiced it for real ($0.35)**. That was almost certainly a running API server's startup recovery after a `--reload` restart (D-38). It also flipped 15708/15709 from paused to `failed at voicing`, without audio. That left 15710 `ready` with v1 audio but a v2 script in the DB. It was then fixed with `rescript 15710 --force`: the audio was discarded and the episode rescripted (556 / 540 words, flags 3 → 1, 2 polish reverts, $0.10). Its review file shows this second run. Startup recovery should not resume an episode that a live CLI process is working on. Out of scope here and not fixed.
+
+## D-60 — Optional on-disk trace of the scripting stage (SCRIPT_TRACE_DIR) (2026-09-27, phase 10)
+**Context.** Scripting v2 (D-59) makes 10–20 model calls per episode, but only a compact `ScriptStep` list (step, words, flags, cost) survives on `episode.script.trace`. Deciding what to change next — e.g. why polish edits get reverted — needs the actual intermediate texts, the flags with reasons, and the exact rendered prompts.
+
+**Decision.** A small helper, `app/pipeline/script_trace.py`, turned on only by the `SCRIPT_TRACE_DIR` setting (unset by default). When it is set, `script.run` writes to `<SCRIPT_TRACE_DIR>/<episode_id>/`, numbered in pipeline order: `00_inputs.md`, `01_outline.{json,md}`, per story `02_sN_draft.md` / `03_sN_grounding.json` / `04_sN_patched.md` + `05_sN_regrounding.json` (only if flagged), `06_polish.md` (changed turns shown as before → after), `07_polish_grounding.json` (flags, which source ids the checker was given per section, reverts), `08_final.md`, plus `prompts/NN_<step>.txt` for every call and `calls.json` (step, model, tokens, cost, latency). Prompts and usage are captured by a thin proxy around the LLM adapter, passed only when tracing is on, so `grounding.py` and the prompts are unchanged. When the setting is unset, the proxy is not used and nothing is written.
+
+**Trade-offs.** Files, not DB rows: this is a debugging aid for prompt work, nothing reads it back, and it can be deleted freely. It adds a few `run_.tracer.write_*` calls through `script.py`, which is the cost of seeing every step. No change to prompts, pipeline logic or what is persisted.
+
+## D-61 — Classifier v2 (dates + `is_stale`), topic coverage in selection, measured reasoning defaults (2026-09-27, phase 08)
+
+**Context.** Three problems from the scripting-v2 runs (D-59/D-60):
+- Episode 15710 aired a Bundesliga match (article a655, Bayern 3–2 Dortmund, "ten rounds remain") that was played in February 2026; Exa's `published_date` said 2026-09-26. Nothing in ranking knew today's date or the episode window, so nothing could notice. D-28 already saw the same thing (the Las Vegas Verstappen/McLaren-disqualification story, a November 2025 event, in episode 1) and left it open.
+- Selection was score-only, so one topic could take every slot: the markets user got no rates story and the general user no climate story.
+- The fact-checker (`grounding_check.v2`, Luna/low) flip-flops: re-checking a patched section often flags different turns. And one grounding call took 342 s, because the OpenAI client used the SDK's 10-minute default timeout.
+
+**Rules fixed before running any eval (this paragraph was written before the first real call).**
+*Classifier config.* Candidates, all on `classifier.v2`: Sol/none (the baseline, today's default model), Luna/none, Luna/low, Luna/medium. The choice is **the cheapest config (measured $/100) that passes all of**:
+1. Δ keep-gate ROC-AUC vs v2 Sol/none ≥ −0.05 (D-44's non-inferiority margin);
+2. Δ newsworthy ROC-AUC vs v2 Sol/none ≥ −0.05;
+3. keep-gate discordants, #(challenger wrong, Sol right) − #(Sol wrong, challenger right), ≤ 3 (Luna's own run-to-run disagreement from D-45);
+4. selection precision ≥ Sol's − 0.125 (one story of 8);
+5. **zero false positives**: no row labeled `is_stale=false` is flagged stale. A false positive silently removes a good article from an episode, which is worse than missing a stale one (the script writer and the listener can still catch that).
+Metrics 1–4 are computed on the 60 original D-44 rows only (so v1 and v2 compare on the same rows); rule 5 on every fresh row (the 60 originals + the trap rows). Stale recall is reported per difficulty (easy / medium / hard) and real vs synthetic separately; it is **not** a gate (the synthetic rows are ours, and the hard ones are expected misses). If no config passes, the default stays Sol/none and v2 still ships only if Sol/none itself has zero false positives. v1 vs v2 on the same model (Sol/none, Luna/none, from the cached v1 runs) is reported to show whether the prompt change moved relevance/newsworthy.
+*Fact-checker reasoning.* 12 story sections from the D-60 traces (episodes 15708, 15709, 15710, first grounding pass of each story section), `grounding_check.v2` with Luna at `low` and at `medium`, 3 runs each. Per config: turns whose verdict (flagged / not flagged) differs between runs, average flags per section, cost, latency. Pick **`medium` if it cuts flipping turns by at least a third at under 2× the cost of `low`; otherwise keep `low`.**
+
+**What was built.**
+- `classifier.v2.md` (v1 kept as history): v1 plus "Today is {today}. This episode covers news since {window_start}." and an `is_stale` instruction. `ArticleScoreResult.is_stale` (default false, not persisted). The `Classifier` protocol's `score()` takes `window_start`; `LLMClassifier` reads today from its clock (injectable, so the eval can pin it). `JevClassifier` accepts `window_start` and ignores it: jev.v2 has no staleness question, so **Jev always returns `is_stale=False`**, and a stale story is only caught when the OpenAI classifier scores it (the default provider, or Jev's per-article fallback). `FallbackClassifier` and `FakeClassifier` pass it through / ignore it.
+- `select_stories` skips `is_stale` candidates exactly like `already_covered`, and `rank.run` logs how many were dropped as stale. No DB column: `Candidate` is built from the classifier result in the same run.
+- Topic coverage in `select_stories`: (1) the focus slot; (2) each remaining topic, strongest first (by its best candidate's score), gets its best eligible candidate while slots remain; (3) the rest by score under the existing per-topic cap. After the focus slot, stories are ordered by score.
+- `OpenAILLM`: `timeout=OPENAI_TIMEOUT_S` (default 90 s, was the SDK's 10 minutes) and `max_retries=1`. New setting `MODEL_CLASSIFIER_REASONING` (used instead of the inline `"none"`). `MODEL_GROUNDING_REASONING` unchanged.
+- Eval: `eval/classifier_grid.py` caches per config in `eval/results/grid/<prompt>__<model>__<reasoning>.jsonl`, and a row is reused only when all three match. The notebook now passes `window_start`, keys its cache on prompt + model + reasoning, writes other configs' rows back instead of deleting them (so the v1 caches survive a re-run), and scores only the original D-44 rows. `eval/grounding_noise.py` re-sends the traced grounding prompts.
+
+**Eval set changes (`eval/articles.csv`, 60 → 76 rows).** The brief said 62 existing rows; there are 60. New columns: `set`, `label_stale`, `stale_difficulty`, `synthetic`, `based_on`, `profile_email`, `window_start`, `today`. The originals came from episode 8 (window opened 2026-09-17, fetched 2026-09-24). Skimming them, three are actually stale because their own date is before that window, so they are relabeled `is_stale=1` (easy): 236 (Gen Con 2026 recap, published 08-04), 233 (a listings page, 09-08) and 196 (a budgeting guide, 09-16). Added: 2 real stale rows with their own users' profiles and windows (655 Bayern–Dortmund, "ten rounds remain", episode 15710; 79 Las Vegas disqualification, episode 1), both "medium" (the clue is the season stage, not a date); 10 synthetic stale rows built on real rows' topics (3 easy: an explicit older date; 4 medium: season stage, a known past event, a summer convention "wrapping Sunday" in late September; 3 hard: no clue at all); 4 synthetic traps (fresh stories citing 2022–2025 dates, `is_stale=0`). Synthetic rows have negative ids and are never written to the DB.
+
+**Results (all numbers in `eval/results/classifier_v2_grid.md` and `grounding_noise.md`).**
+
+| config (classifier.v2) | keep AUC | news AUC | sel. prec | discordant net | fresh rows flagged stale | $/100 | $/episode (60 cand.) | p50 ms |
+|---|---|---|---|---|---|---|---|---|
+| sol/none | 1.000 | 0.999 | 1.000 | 0 | 6/61 | $0.305 | $0.183 | 1797 |
+| luna/none | 0.943 | 0.948 | 0.750 | 5 | 3/61 | $0.015 | $0.009 | 1233 |
+| luna/low | 0.932 | 0.931 | 0.750 | 3 | 4/61 | $0.018 | $0.011 | 1858 |
+| luna/medium | 0.938 | 0.937 | 0.750 | 4 | 9/61 | $0.022 | $0.013 | 2000 |
+
+Stale recall, sol/none: real easy 2/3, real medium 2/2 (both 655 and 79), synthetic easy 3/3, medium 4/4, hard 2/3. Luna/none: 3/3, 0/2, 3/3, 1/4, 0/3. Reasoning effort did not help Luna on quality or staleness (medium had the most false positives).
+v1 → v2 on the same model (60 D-44 rows): Sol keep AUC 0.993 → 1.000, news AUC 0.993 → 0.999, selection precision 0.875 → 1.000; Luna keep AUC 0.907 → 0.943, news AUC 0.894 → 0.948, selection precision 0.875 → 0.750. The date context did not hurt relevance/newsworthy (both v1 figures are re-computed with the new `select_stories`, so they differ from `latest.md`).
+Fact-checker, Luna, 12 sections / 84 turns, 3 runs each: low 8 flipping turns (7/12 sections), 1.22 flags per section, $0.00044 per check, p50 3.6 s; medium 7 flipping turns (6/12), 1.33 flags, $0.00056, p50 4.2 s, max 10.7 s. Flips cut 12% at 1.26× the cost.
+
+**Decision.**
+- Fact-checker: **stays `low`** (the rule wanted a ≥ 1/3 cut in flips).
+- Classifier: **Sol/none, with the stale filter on.** By the rule fixed above, no config passed (every one flags some fresh rows as stale), so the rule's own fallback said to keep the model and not ship v2. **The user overrode that** after seeing the numbers: Sol/none ships with classifier.v2 and `is_stale` drops candidates. Sol/none's 6 false positives are 3 junk pages that the keep gate rejects anyway (249, 177, 197) and 3 good stories: 212 (BBC on UK rates, published on the window's first day), 205 (analysis of a Fed hike made 1–2 days before the window opened) and 247 (a crowdfunding saga citing 2021/2024 dates). That is about 3 of 39 keepable originals lost on this set, accepted in exchange for catching 13 of 15 stale rows, including both real ones that reached an episode.
+- Defaults (`config.py`, `.env.example`): `MODEL_CLASSIFIER=gpt-6-sol`, `MODEL_CLASSIFIER_REASONING=none`, `MODEL_GROUNDING_REASONING=low`, `OPENAI_TIMEOUT_S=90`.
+
+**Follow-up (not done here; prompts are unchanged in this commit, per the user).** The false positives come from v2's hard rule ("happened before {window_start}"). The next version of this prompt, and runtime prompts generally, should:
+1. include **worked examples** of both verdicts;
+2. make the model **state its reason before the verdict** (a short reason field ahead of `is_stale` / the scores in the structured output). This is cheap reasoning at no reasoning-effort cost, which matters because reasoning effort measured as not worth it here;
+3. treat the stale cutoff as a **soft margin set by the examples, not a hard boundary**. For example, if the window opens on Wednesday, an event from the Monday before is acceptable (not stale), while a month-old event is stale. Row 205 is exactly that case.
+The same pattern should be considered for `grounding_check`, where flip-flopping is the problem and reasoning effort did not fix it.
+
+**Caveats.** 12 of the 16 new rows are synthetic and written by us, so their recall figures are illustrative, and the hard ones are expected misses that justify a later full-text check. "Fresh" is 61 rows, so a zero-false-positive gate is strict but small. There is one annotator, and the three relabeled originals are judgment calls. Jev is not covered (it never returns `is_stale`). The per-episode wait assumes rank.py's 8-way concurrency, about 14 s for Sol at 60 candidates. The classifier's prompt version is still not recorded on `episodes.prompt_versions` (it wasn't under v1 either); noted, not fixed. The eval spent about $0.33: about $0.29 on the classifier grid (including one aborted first run, caused by an OpenAI SDK race when 8 threads make the first `responses.parse` call at once; the eval scripts now make one warm-up call first) and about $0.04 on the fact-checker runs. Production `rank.run` runs the same pool and has not hit this race, but it could on a cold process. Recorded, not fixed here.

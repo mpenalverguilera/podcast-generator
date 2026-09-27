@@ -2,6 +2,7 @@ import json
 import logging
 import random
 import secrets
+import shutil
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,7 +29,7 @@ from app.models import (
 from app.pipeline.episodes import EpisodeConflict
 from app.pipeline.episodes import create_episode as _create_episode_row
 from app.pipeline.profile import extract_profile
-from app.pipeline.runner import run_episode
+from app.pipeline.runner import STOPPED_AFTER, run_episode
 from app.pipeline.script import strip_audio_tags
 from app.schemas import Script
 from app.users import create_user
@@ -339,6 +340,78 @@ def run_cmd(
         )
         raise typer.Exit(code=1)
     typer.echo(f"episode {episode_id} status: {episode.status.value}")
+
+
+_RESCRIPTABLE_FAILED_STAGES = {
+    EpisodeStatus.SCRIPTING.value,
+    EpisodeStatus.VOICING.value,
+    EpisodeStatus.ASSEMBLING.value,
+}
+
+
+@cli.command("rescript")
+def rescript_cmd(
+    episode_id: int = typer.Argument(..., help="Episode id to rewrite the script for"),
+    force: bool = typer.Option(
+        False, "--force", help="Also allow a ready episode (its audio will be discarded)"
+    ),
+) -> None:
+    """Re-runs only the scripting stage on the episode's cached articles and
+    stops before voicing: LLM cost only, no Exa or classifier spend. For
+    iterating on the scripting prompts (docs/DECISIONS.md D-59)."""
+    settings = get_settings()
+    with session_scope() as db:
+        episode = db.get(Episode, episode_id)
+        if episode is None:
+            typer.echo(f"no episode with id {episode_id}", err=True)
+            raise typer.Exit(code=1)
+        paused = episode.status == EpisodeStatus.VOICING and (episode.error or "").startswith(
+            STOPPED_AFTER
+        )
+        failed_late = (
+            episode.status == EpisodeStatus.FAILED
+            and episode.failed_stage in _RESCRIPTABLE_FAILED_STAGES
+        )
+        ready = episode.status == EpisodeStatus.READY
+        if ready and not force:
+            typer.echo(
+                f"episode {episode_id} is ready; a new script would no longer match its audio. "
+                "Pass --force to rescript it anyway (the audio is discarded).",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if not (paused or failed_late or ready):
+            typer.echo(
+                f"episode {episode_id} is {episode.status.value}; rescript needs an episode "
+                "paused after scripting or failed at scripting or later",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        episode.status = EpisodeStatus.SCRIPTING
+        episode.script = None
+        episode.title = None
+        episode.summary = None
+        episode.grounding_flags_initial = None
+        episode.grounding_flags_final = None
+        episode.error = None
+        episode.failed_stage = None
+        episode.audio_path = None
+        episode.duration_s = None
+        episode.ready_at = None
+    # voice.py skips chunks that already exist on disk, so chunks of the old
+    # script would otherwise be stitched into the new episode's audio.
+    shutil.rmtree(Path(settings.data_dir) / "chunks" / str(episode_id), ignore_errors=True)
+
+    logger.info("rescripting episode %s", episode_id)
+    episode = run_episode(episode_id, stop_after="scripting")
+    if episode.status == EpisodeStatus.FAILED:
+        typer.echo(
+            f"episode {episode_id} failed at {episode.failed_stage}: {episode.error}", err=True
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"episode {episode_id} rescripted: {episode.title!r}")
+    typer.echo(f"run `transcript {episode_id}` to read it, `run {episode_id}` to voice it")
 
 
 @cli.command("show")

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from app.schemas import ArticleScoreResult, InterestProfile, Usage
@@ -17,10 +18,15 @@ class Classifier(Protocol):
     # one topic that found it (one row per matching topic, D-21), so ranking
     # needs to score an article against that *specific* topic, not have the
     # classifier re-guess which of the profile's topics is best.
+    #
+    # `window_start` is the episode's news window (D-61): classifier.v2 is told today's date and
+    # the window so it can flag an article whose event happened before it (`is_stale`) even when
+    # `published_at` says otherwise. Today is read inside the adapter, not passed in.
     def score(
         self,
         article: "Article",
         profile: InterestProfile,
         topic: str,
         recent_headlines: list[str],
+        window_start: datetime,
     ) -> tuple[ArticleScoreResult, Usage]: ...

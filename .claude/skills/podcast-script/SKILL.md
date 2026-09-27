@@ -41,7 +41,8 @@ Deep-depth topics get longer stories; headline-depth topics get 3–4 turns.
 - Opinions are framed as the hosts' reactions or questions, not as facts.
 
 ## Length
-- Target words = `target_minutes × 150`; the validator accepts ±15%.
+- Target words = `target_minutes × 135` (measured eleven_v3 pace, D-28/D-59). About 12% (min 60 words) goes to the intro + outro; the outline splits the rest per section. Each section must land within ±25% of its target; the episode total is only warned on outside ±20%.
+- Scripting is outline → sequential sections → polish (D-59); `script_writer.v1.md` is history only.
 - If there is too little material, shorten the episode instead of padding.
 
 ## Grounding check (second pass, `grounding_check` prompt, `gpt-6-luna`)
