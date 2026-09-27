@@ -1,8 +1,7 @@
 """script.run() end to end with a stub LLM: outline -> sections with
-per-section grounding and patching -> frame (intro/outro only, with the
-disclosure line inserted by code). The stub answers from FakeLLM unless a
-test queues something, and its grounding check flags any turn containing the
-planted marker."""
+per-section grounding and patching -> frame (intro/outro only, story sections
+untouched). The stub answers from FakeLLM unless a test queues something, and
+its grounding check flags any turn containing the planted marker."""
 
 import json
 import math
@@ -160,21 +159,6 @@ def test_run_writes_intro_stories_outro_with_outline_attached(db) -> None:
     assert usage.cost_usd == pytest.approx(0.005)
     step = db.scalars(select(PipelineStep).where(PipelineStep.stage == "grounding")).one()
     assert float(step.cost_usd) == pytest.approx(0.004)  # 3 sections + 1 frame check
-
-
-def test_disclosure_line_is_inserted_by_code_and_never_sent_for_grounding(db) -> None:
-    episode, _ = _episode(db, 1)
-    llm = _StubLLM()
-    script.run(episode, _adapters(llm), db)
-
-    intro = episode.script["sections"][0]
-    assert any(t["text"] == "Quick note: this briefing is AI-generated." for t in intro["turns"])
-    # The prompt tells the model not to write this line itself...
-    frame_prompt = llm.prompts("FrameOutput")[0]
-    assert "Do not write a line about this being an AI-generated briefing" in frame_prompt
-    # ...and the fixed line is never sent to the grounder.
-    ground_prompt = llm.prompts("GroundingReport")[-1]
-    assert "Quick note: this briefing is AI-generated." not in ground_prompt
 
 
 def test_sections_are_written_sequentially_with_earlier_sections_visible(db) -> None:

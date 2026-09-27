@@ -106,12 +106,11 @@ class SectionDraft(BaseModel):
 
 class FrameOutput(BaseModel):
     """Model output for the frame call (D-62, replacing the old `polish` step
-    and its `PolishedScript`). The frame writes only the intro's cold open and
-    preview and the outro -- never the story sections, which pass through
-    untouched -- and never the AI-generated-briefing disclosure line, which
-    code inserts between cold_open_turns and preview_turns as a fixed
-    constant (`_DISCLOSURE_TURN` in script.py) so it can never be miswritten
-    or mistaken for an unsupported claim by the grounder."""
+    and its `PolishedScript`; D-63 dropped the AI-generated-briefing
+    disclosure line this once inserted between cold_open_turns and
+    preview_turns). The frame writes only the intro's cold open and preview
+    and the outro -- never the story sections, which pass through
+    untouched."""
 
     title: str
     summary: str

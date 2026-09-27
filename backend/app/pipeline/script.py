@@ -1,5 +1,5 @@
-"""Scripting stage, v2.1 (docs/DECISIONS.md D-59, D-62). Still one pipeline
-stage and one `Script` on episode.script, built in three steps:
+"""Scripting stage, v2.1 (docs/DECISIONS.md D-59, D-62, D-63). Still one
+pipeline stage and one `Script` on episode.script, built in three steps:
 
 1. OUTLINE: one call plans order, angle, facts and a per-section word
    ceiling, and may drop a source it finds is actually stale.
@@ -9,8 +9,7 @@ stage and one `Script` on episode.script, built in three steps:
    flagged, one patch call is always kept, and only the turns it actually
    changed are re-checked.
 3. FRAME: one call writes only the intro's cold open + preview and the
-   outro; the AI-generated-briefing line is inserted by code, never written
-   or fact-checked. Story sections pass through untouched.
+   outro. Story sections pass through untouched.
 """
 
 import logging
@@ -84,13 +83,6 @@ _BANNED_PHRASES = (
     "you asked about",
     "it'll be interesting to see",
 )
-
-# D-62: the AI-generated-briefing disclosure is a fixed line inserted by code
-# between the frame's cold open and preview -- never written by the model
-# (so it can't drift or go missing) and never sent for fact-checking (it was
-# wrongly flagged as an unsupported claim in the D-59 traces, since no
-# source ever says the briefing itself is AI-generated).
-_DISCLOSURE_TURN = Turn(speaker="host_b", text="Quick note: this briefing is AI-generated.")
 
 # Domains whose title-cased name reads wrong aloud. Only used for the
 # human-readable review export now (eval/scripts_v2/export_review.py) --
@@ -295,9 +287,8 @@ def only_word_count_errors(errors: list[str]) -> bool:
 def validate_frame(frame: FrameOutput, host_names: list[str], has_focus_section: bool) -> list[str]:
     """Pure checks on the frame call's output (D-62, replacing check_polish):
     turn-count shape, the shared turn rules on the intro (cold open + preview
-    combined, before the disclosure line is inserted) and the outro, and that
-    "you asked about" appears at most once, and only if there is a focus
-    section to justify it."""
+    combined) and the outro, and that "you asked about" appears at most once,
+    and only if there is a focus section to justify it."""
     errors: list[str] = []
     if not (1 <= len(frame.cold_open_turns) <= 2):
         errors.append(f"cold_open_turns must be 1-2 turns, got {len(frame.cold_open_turns)}")
@@ -874,9 +865,7 @@ def _frame(
     has_focus_section: bool,
     focus_request: str | None,
 ) -> FrameOutput:
-    intro_total, outro_words = frame_word_targets(frame_budget)
-    disclosure_words = len(_DISCLOSURE_TURN.text.split())
-    intro_words = max(1, intro_total - disclosure_words)
+    intro_words, outro_words = frame_word_targets(frame_budget)
     prompt = load_prompt(
         "frame",
         host_a=run.names["host_a"],
@@ -1029,7 +1018,7 @@ def _frame_md(
         [
             f"# Frame -- {frame_out.title}\n",
             f"Summary: {frame_out.summary}\n",
-            "## Intro (final -- disclosure line inserted by code, excluded from fact-checking)",
+            "## Intro (final)",
             turns_md(final_intro.turns, names),
             "\n## Outro (final)",
             turns_md(final_outro.turns, names),
@@ -1220,13 +1209,12 @@ def _script(
         flags_final[final_index] = flags
         drafts.append(section)
 
-    # 3. Frame: intro (cold open + code-inserted disclosure + preview) and
-    #    outro. Story sections pass through untouched (D-62).
+    # 3. Frame: intro (cold open + preview) and outro. Story sections pass
+    #    through untouched (D-62).
     has_focus_section = any(
         source_by_id[sid].topic == _FOCUS_TOPIC for p in outline.sections for sid in p.source_ids
     )
     frame_out = _frame(run_, outline, frame_budget, has_focus_section, episode.focus_request)
-    cold_open_len = len(frame_out.cold_open_turns)
     intro_work = [*frame_out.cold_open_turns, *frame_out.preview_turns]
     outro_work = list(frame_out.outro_turns)
 
@@ -1274,11 +1262,7 @@ def _script(
         )
         outro_work = outro_section.turns
 
-    cold_open_len = min(cold_open_len, len(intro_work))
-    final_intro = Section(
-        kind="intro",
-        turns=[*intro_work[:cold_open_len], _DISCLOSURE_TURN, *intro_work[cold_open_len:]],
-    )
+    final_intro = Section(kind="intro", turns=intro_work)
     final_outro = Section(kind="outro", turns=outro_work)
 
     run_.tracer.write_text(
