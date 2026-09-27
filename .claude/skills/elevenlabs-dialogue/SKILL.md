@@ -45,7 +45,7 @@ from elevenlabs.client import ElevenLabs
 
 client = ElevenLabs(api_key=settings.elevenlabs_api_key)   # required kwarg, not auto-read from env
 with client.text_to_dialogue.with_raw_response.convert(
-    inputs=[{"text": t.text, "voice_id": t.voice_id} for t in turns],
+    inputs=[{"text": t.text, "voice_id": voices[t.speaker]} for t in turns],
     model_id=settings.elevenlabs_model,
     output_format=settings.elevenlabs_output_format,
     seed=seed,
@@ -66,8 +66,13 @@ the `with ... as resp:` form is required (not optional sugar).
 ## Adapter contract
 ```python
 class TTS(Protocol):
-    def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]: ...
+    def synthesize_chunk(
+        self, turns: list[Turn], seed: int | None, voices: dict[str, str]
+    ) -> tuple[bytes, Usage]: ...
 ```
+`voices` maps `speaker` (`"host_a"`/`"host_b"`) to a voice_id, resolved once per episode by
+`voice.run` -- the user's saved `preferences.host_a/b.voice_id` if set, else
+`DEFAULT_VOICE_HOST_A/B` -- never looked up inside the adapter itself (D-58).
 Confirmed live in phase 00: a successful `text_to_dialogue` response carries a **`character-cost`**
 response header equal to the exact number of characters billed (tags included — a 36-character
 2-turn call returned `character-cost: 36`), plus a **`request-id`** header and a bonus

@@ -8,4 +8,6 @@ class TTS(Protocol):
     # batch before sending it, without isinstance checks on adapters.
     provider: str
 
-    def synthesize_chunk(self, turns: list[Turn], seed: int | None) -> tuple[bytes, Usage]: ...
+    def synthesize_chunk(
+        self, turns: list[Turn], seed: int | None, voices: dict[str, str]
+    ) -> tuple[bytes, Usage]: ...

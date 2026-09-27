@@ -19,6 +19,13 @@ os.environ["SEARCH_PROVIDER"] = "fake"
 os.environ["LLM_PROVIDER"] = "fake"
 os.environ["CLASSIFIER_PROVIDER"] = "fake"
 os.environ["TTS_PROVIDER"] = "fake"
+# D-58: voice.run now requires a resolvable voice_id per speaker (user pref or
+# this default) before it will voice a chunk -- force both regardless of what
+# a developer's local .env has configured, so tests that voice an episode via
+# make_user_with_episode's bare preferences (no voice_id) don't need every
+# call site to know about voice resolution.
+os.environ["DEFAULT_VOICE_HOST_A"] = "test-voice-a"
+os.environ["DEFAULT_VOICE_HOST_B"] = "test-voice-b"
 
 import pytest  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
