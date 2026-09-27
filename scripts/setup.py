@@ -10,7 +10,13 @@ What it does:
    gitignored and a new worktree doesn't get it; otherwise copies `.env.example` -> `.env`.
 3. Runs `uv sync` in `backend/`, creating/updating `backend/.venv` from
    `pyproject.toml` + `uv.lock` -- this is the actual "requirements install" step.
-4. Installs Exa's official `build-with-exa` skill into `.claude/skills/` if missing,
+4. Starts the `db` service from `docker-compose.yml` (`docker compose up -d --wait db`) and
+   waits for its healthcheck -- requires Docker to be installed and running.
+5. Runs Alembic migrations (`alembic upgrade head`) against that db.
+6. Seeds the db: `seed-users` (idempotent admin/demo/classifier-eval users from `.env`) and
+   `seed-metrics` (synthetic usage data for the admin dashboard; safe to re-run -- it replaces
+   its own previously seeded rows and never touches real ones).
+7. Installs Exa's official `build-with-exa` skill into `.claude/skills/` if missing,
    via `npx skills add ...` when Node is available, else by cloning
    `exa-labs/agent-skills` and copying just that skill folder (this repo's fallback,
    used in phase 00 where neither `node` nor `npx` were on PATH).
@@ -118,6 +124,26 @@ def ensure_backend_env(uv: str) -> None:
     run([uv, "sync"], cwd=BACKEND)
 
 
+def ensure_db() -> None:
+    """Brings up the `db` compose service and waits for it to be healthy."""
+    docker = shutil.which("docker")
+    if not docker:
+        sys.exit(
+            "docker not found on PATH. Install Docker Desktop (Windows/macOS) or Docker "
+            "Engine + the compose plugin (Linux), make sure it's running, and re-run this script."
+        )
+    run([docker, "compose", "up", "-d", "--wait", "db"], cwd=ROOT)
+
+
+def run_migrations(uv: str) -> None:
+    run([uv, "run", "alembic", "upgrade", "head"], cwd=BACKEND)
+
+
+def seed_database(uv: str) -> None:
+    run([uv, "run", "python", "-m", "app.cli", "seed-users"], cwd=BACKEND)
+    run([uv, "run", "python", "-m", "app.cli", "seed-metrics"], cwd=BACKEND)
+
+
 def ensure_exa_skill() -> None:
     skill_dir = ROOT / ".claude" / "skills" / "build-with-exa"
     if skill_dir.exists():
@@ -149,12 +175,18 @@ def main() -> None:
     uv = ensure_uv()
     ensure_env_file()
     ensure_backend_env(uv)
+    ensure_db()
+    run_migrations(uv)
+    seed_database(uv)
     ensure_exa_skill()
     print("\nSetup complete.")
     print("- Backend deps installed/synced in backend/.venv from pyproject.toml + uv.lock")
+    print("- Postgres is up (docker compose, db service), migrated to head, and seeded")
+    print("  Log in with SEED_USER_EMAIL/SEED_USER_PASSWORD from .env (demo@example.com/demo by")
+    print("  default), or SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD for the admin dashboard")
     print("- Make sure .env has real API keys before running any real provider call")
     print("- Try: uv run --project backend python scripts/smoke/openai_check.py")
-    print("  (uv run pytest -q works once a phase adds pytest as a dependency and tests exist)")
+    print("  (cd backend && uv run pytest -q to run the test suite)")
 
 
 if __name__ == "__main__":
