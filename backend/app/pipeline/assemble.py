@@ -16,6 +16,10 @@ from app.schemas import Usage
 logger = logging.getLogger(__name__)
 
 _SILENCE_MS = 600
+# Longer than the inter-section gap: a pause this size after the last line
+# reads as a deliberate close rather than another section boundary, so the
+# episode doesn't cut off the instant the hosts stop talking.
+_OUTRO_SILENCE_MS = 1500
 # Podcast loudness standard (ARCHITECTURE §5.7 / elevenlabs-dialogue skill).
 _LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
 # ElevenLabs' "pcm_44100" is raw, headerless 16-bit signed little-endian audio
@@ -65,6 +69,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
         if i > 0:
             combined += silence
         combined += _load_chunk(path, ext)
+    combined += AudioSegment.silent(duration=_OUTRO_SILENCE_MS)
 
     audio_dir = Path(settings.data_dir) / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)

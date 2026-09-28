@@ -150,7 +150,7 @@ pending → planning → fetching → ranking → extracting → scripting → v
 - Fallback adapter (not built unless needed): per-turn `eleven_multilingual_v2` with request stitching.
 
 ### 5.7 Assemble
-- Concatenate chunks with ~600 ms of silence at section boundaries; ffmpeg `loudnorm` to −16 LUFS (podcast standard); export MP3 (128 kbps, 44.1 kHz) to `data/audio/{episode_id}.mp3`.
+- Concatenate chunks with ~600 ms of silence at section boundaries and a longer ~1.5 s pad after the last chunk (so the episode doesn't cut off abruptly); ffmpeg `loudnorm` to −16 LUFS (podcast standard); export MP3 (128 kbps, 44.1 kHz) to `data/audio/{episode_id}.mp3`.
 - Store duration and path. Mark `ready`; emit `episode_generated`.
 
 ### 5.8 Every provider call records
