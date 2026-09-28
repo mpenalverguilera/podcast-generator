@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.pipeline.budget import MAX_MINUTES, MIN_MINUTES
 from app.schemas import InterestProfile
 from app.voices import CURATED_VOICES
 
@@ -122,7 +123,7 @@ class PreferencesUpdate(BaseModel):
     settings page saves whichever section the user just edited."""
 
     interest_profile: InterestProfile | None = None
-    target_minutes: int | None = Field(default=None, ge=3, le=12)
+    target_minutes: int | None = Field(default=None, ge=MIN_MINUTES, le=MAX_MINUTES)
     # The settings page's three options; free text here would be pasted
     # straight into the script-writer prompt.
     tone: Literal["conversational", "focused", "playful"] | None = None
@@ -141,7 +142,7 @@ class VoiceOut(BaseModel):
 
 class EpisodeGenerateRequest(BaseModel):
     focus_request: str | None = None
-    target_minutes: int | None = Field(default=None, ge=3, le=12)
+    target_minutes: int | None = Field(default=None, ge=MIN_MINUTES, le=MAX_MINUTES)
 
 
 class EpisodeCreated(BaseModel):

@@ -157,7 +157,7 @@ pending → planning → fetching → ranking → extracting → scripting → v
 `pipeline_steps`: episode_id, stage, status, provider, model, units_in, units_out (tokens or characters), cost_usd, cost_is_estimate, latency_ms, started_at, finished_at, error. This one table feeds every operational metric. Exa returns its own `costDollars` (exact); OpenAI cost is exact token counts × published prices; ElevenLabs `units_in` is exact (the `character-cost` response header, confirmed in phase 00 — see D-12), but `cost_usd` is `units_in × ELEVENLABS_USD_PER_1K_CHARS`, a config estimate, since the real plan price isn't visible with this key. `cost_is_estimate` is `false` for Exa/OpenAI rows, `true` for ElevenLabs rows. All computed in `app/pricing.py`.
 
 ### 5.9 Cost guardrails
-- `MAX_TTS_CHARS_PER_EPISODE` (default 12,000) and `DAILY_SPEND_CAP_USD` (default 5): the runner refuses to start a stage that would exceed them.
+- `MAX_TTS_CHARS_PER_EPISODE` (default 18,000, enough for a 20-minute episode; D-65) and `DAILY_SPEND_CAP_USD` (default 5): the runner refuses to start a stage that would exceed them.
 - CLI flags for cheap iteration: `--minutes 1`, `--tts fake`, `--stop-after scripting`.
 
 ## 6. Adapters

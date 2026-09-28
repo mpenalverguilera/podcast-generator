@@ -87,6 +87,12 @@ class OutlineSection(BaseModel):
     key_facts: list[str]
     must_not_cover: list[str]
     bridge_in: str | None = None
+    # D-65 (outline.v3): `angle` above now carries the section's *take* -- one
+    # declarative, arguable claim -- instead of a question. These two give the
+    # hosts something real to discuss beyond it. Defaulted so outlines already
+    # stored on episodes (voice.py, the transcript API) still validate.
+    tension: str | None = None
+    open_questions: list[str] = Field(default_factory=list)
 
 
 class DroppedSource(BaseModel):
@@ -160,6 +166,32 @@ class UnsupportedClaim(BaseModel):
 
 class GroundingReport(BaseModel):
     unsupported: list[UnsupportedClaim] = Field(default_factory=list, max_length=30)
+
+
+class ClaimCheck(BaseModel):
+    """One statement the grounding check looked at (grounding_check.v4, D-65).
+    Field order is deliberate: the model writes what the source says
+    (`evidence`) before it commits to a `verdict` -- cheap reasoning with no
+    reasoning-effort cost, the D-61 follow-up for its flip-flopping. A "take"
+    is a host's interpretation that adds no new specific: allowed."""
+
+    section_index: int
+    turn_index: int
+    claim: str
+    evidence: str
+    verdict: Literal["supported", "take", "unsupported"]
+    suggested_fix: str
+
+
+class GroundingChecks(BaseModel):
+    """What the grounding model returns (D-65). grounding.check() keeps only
+    the "unsupported" rows and hands back a GroundingReport, so everything
+    downstream -- patching, persisted flags, the CLI -- is unchanged."""
+
+    # No max_length: a long deep section can have many checkable statements, and
+    # a validation error here would fail the whole stage. to_report() caps the
+    # flags it keeps at GroundingReport's 30.
+    checks: list[ClaimCheck] = Field(default_factory=list)
 
 
 class Usage(BaseModel):

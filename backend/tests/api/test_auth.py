@@ -65,7 +65,7 @@ def test_signup_creates_user_with_default_preferences_and_signs_in(db) -> None:
     assert me["has_profile"] is False
 
     user = db.scalar(select(User).where(User.email == "new.user@example.com"))
-    assert user.preferences is not None and user.preferences.target_minutes == 6
+    assert user.preferences is not None and user.preferences.target_minutes == 10
     assert db.scalar(select(Event).where(Event.user_id == user.id, Event.type == "signup"))
 
 

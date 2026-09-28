@@ -34,17 +34,17 @@ def test_generate_list_detail_and_audio_range(db) -> None:
 
     resp = client.post(
         "/episodes/generate",
-        json={"target_minutes": 4, "focus_request": "prior authorization"},
+        json={"target_minutes": 6, "focus_request": "prior authorization"},
         headers=auth_headers(token),
     )
     assert resp.status_code == 201, resp.text
     created = resp.json()
-    assert created["target_minutes"] == 4
+    assert created["target_minutes"] == 6
     episode_id = created["id"]
 
     detail = _poll_until_terminal(token, episode_id)
     assert detail["status"] == "ready", detail
-    assert detail["target_minutes"] == 4
+    assert detail["target_minutes"] == 6
     assert detail["trigger"] == "manual"
     assert detail["focus_request"] == "prior authorization"
     assert detail["my_rating"] is None
@@ -142,7 +142,7 @@ def test_generate_out_of_range_minutes_is_422(db) -> None:
     make_user(db, email="oor@example.com")
     token = login("oor@example.com")
     resp = client.post(
-        "/episodes/generate", json={"target_minutes": 20}, headers=auth_headers(token)
+        "/episodes/generate", json={"target_minutes": 21}, headers=auth_headers(token)
     )
     assert resp.status_code == 422
 

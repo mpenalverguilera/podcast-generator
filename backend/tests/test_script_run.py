@@ -17,13 +17,13 @@ from app.models import Article, ArticleScore, ContentSource, EpisodeItem, Pipeli
 from app.pipeline import script
 from app.pipeline.script import ScriptingError, scale_max_words, short_id, word_budget
 from app.schemas import (
+    ClaimCheck,
     FrameOutput,
-    GroundingReport,
+    GroundingChecks,
     Outline,
     RenderedPrompt,
     SectionDraft,
     Turn,
-    UnsupportedClaim,
     Usage,
 )
 from tests.conftest import make_user_with_episode
@@ -45,7 +45,7 @@ class _StubLLM:
         name = schema.__name__
         self.calls.append((name, prompt.text))
         usage = Usage(provider="fake", model=model, cost_usd=0.001, latency_ms=5)
-        if schema is GroundingReport:
+        if schema is GroundingChecks:
             return _flag_marker(prompt.text), usage
         if schema is Outline and self.outlines:
             return self.outlines.pop(0), usage
@@ -62,7 +62,7 @@ class _StubLLM:
         return [text for name, text in self.calls if name == schema_name]
 
 
-def _flag_marker(prompt_text: str) -> GroundingReport:
+def _flag_marker(prompt_text: str) -> GroundingChecks:
     """Reads the grounding prompt's own `Section i` / `turn j:` layout and
     flags every turn that contains the marker, with its local indices."""
     claims = []
@@ -72,15 +72,16 @@ def _flag_marker(prompt_text: str) -> GroundingReport:
             section = int(m.group(1))
         elif (m := _TURN_RE.match(line)) and _MARKER in m.group(2):
             claims.append(
-                UnsupportedClaim(
+                ClaimCheck(
                     section_index=section,
                     turn_index=int(m.group(1)),
                     claim=f"revenue hit {_MARKER}",
-                    reason="not in the source",
+                    evidence="not in the source",
+                    verdict="unsupported",
                     suggested_fix="drop the figure",
                 )
             )
-    return GroundingReport(unsupported=claims)
+    return GroundingChecks(checks=claims)
 
 
 def _draft(total_words: int, marker: bool = False) -> SectionDraft:
@@ -180,7 +181,7 @@ def test_section_grounding_includes_previous_story_as_context(db) -> None:
     # the label, which is always present regardless of whether any section
     # actually has one).
     marker = "not a source for this section's own new facts"
-    grounds = llm.prompts("GroundingReport")
+    grounds = llm.prompts("GroundingChecks")
     assert marker not in grounds[0]  # section 1 has no previous story
     assert marker in grounds[1]
     assert marker in grounds[2]
@@ -250,7 +251,7 @@ def test_frame_grounding_checks_only_intro_and_outro(db) -> None:
     llm = _StubLLM()
     script.run(episode, _adapters(llm), db)
 
-    frame_check = llm.prompts("GroundingReport")[-1]
+    frame_check = llm.prompts("GroundingChecks")[-1]
     assert frame_check.count("Section ") == 2  # intro, outro -- never the story sections
 
 
@@ -338,7 +339,7 @@ def test_an_outline_invalid_twice_fails_with_the_spend_attached(db) -> None:
     assert excinfo.value.usage.cost_usd == pytest.approx(0.002)
 
 
-def test_outline_prompt_includes_today_window_start_and_stale_snippet(db) -> None:
+def test_outline_prompt_includes_today_window_start_and_article_text(db) -> None:
     episode, _ = _episode(db, 1)
     llm = _StubLLM()
     script.run(episode, _adapters(llm), db)
@@ -346,7 +347,7 @@ def test_outline_prompt_includes_today_window_start_and_stale_snippet(db) -> Non
     outline_prompt = llm.prompts("Outline")[0]
     assert "Today is" in outline_prompt
     assert "covers news since" in outline_prompt
-    assert "full text opens:" in outline_prompt
+    assert "article text (first 3000 chars):" in outline_prompt
 
 
 def test_focus_is_rendered_as_the_listener_request_never_the_word_focus(db) -> None:

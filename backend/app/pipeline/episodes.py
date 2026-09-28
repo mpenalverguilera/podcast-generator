@@ -21,6 +21,7 @@ from app.models import (
     User,
 )
 from app.pipeline import STAGE_ORDER
+from app.pipeline.budget import DEFAULT_MINUTES
 from app.pipeline.runner import STOPPED_AFTER, run_episode
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def create_episode(
     target_minutes: int | None,
     trigger: EpisodeTrigger,
 ) -> Episode:
-    """`target_minutes=None` uses the user's saved default (falling back to 6
+    """`target_minutes=None` uses the user's saved default (falling back to 10
     if preferences are somehow missing); a passed value is a one-off override
     for this episode only and never changes the saved default.
 
@@ -71,7 +72,7 @@ def create_episode(
     two concurrent callers."""
     window_start = resolve_window_start(db, owner)
     resolved_minutes = target_minutes or (
-        owner.preferences.target_minutes if owner.preferences else 6
+        owner.preferences.target_minutes if owner.preferences else DEFAULT_MINUTES
     )
 
     episode = Episode(

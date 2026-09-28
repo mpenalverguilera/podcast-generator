@@ -86,7 +86,8 @@ class Settings(BaseSettings):
     elevenlabs_max_attempts: int = 3
 
     # Guardrails
-    max_tts_chars_per_episode: int = 12000
+    # D-65: a 20-minute episode is ~2,700 words, ~17k characters with tags and punctuation.
+    max_tts_chars_per_episode: int = 18000
     daily_spend_cap_usd: float = 5.0
 
     # Dev only: fail each episode once at this stage (e.g. "voicing") so the

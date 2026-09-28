@@ -56,10 +56,12 @@ def _plan(story_id: str, source_ids: list[str], max_words: int = 100) -> Outline
 # --- budget ---
 
 
-def test_word_budget_uses_135_wpm_and_a_12_percent_frame_with_a_floor() -> None:
-    assert word_budget(6) == (810, 97, 713)
-    # 12% of 405 is 49, below the 60-word floor for an intro + outro.
-    assert word_budget(3) == (405, 60, 345)
+def test_word_budget_uses_135_wpm_and_a_12_percent_frame_clamped_to_120_200() -> None:
+    assert word_budget(10) == (1350, 162, 1188)
+    # 12% of 810 is 97, below the 120-word floor for an intro + outro (D-65).
+    assert word_budget(6) == (810, 120, 690)
+    # 12% of 2700 is 324, over the 200-word ceiling.
+    assert word_budget(20) == (2700, 200, 2500)
 
 
 def test_scale_max_words_caps_scaling_up_at_1_3x() -> None:
@@ -352,7 +354,7 @@ def test_grounding_policy_text_is_identical_in_writer_patch_and_grounding_prompt
         return match.group(0)
 
     blocks = {
-        policy(n) for n in ("section_writer.v2.md", "section_patch.v2.md", "grounding_check.v3.md")
+        policy(n) for n in ("section_writer.v3.md", "section_patch.v3.md", "grounding_check.v4.md")
     }
     assert len(blocks) == 1
 

@@ -45,6 +45,7 @@ _REGISTRY: dict[str, dict] = {
         "score": 0.64,
     },
     "GroundingReport": {"unsupported": []},
+    "GroundingChecks": {"checks": []},
     "QueryPlan": {
         "queries": [
             {
@@ -95,6 +96,8 @@ def _fake_outline(prompt_text: str) -> dict:
             "key_facts": [f"fake fact {i + 1}"],
             "must_not_cover": [],
             "bridge_in": None if i == 0 else "a fake bridge",
+            "tension": None,
+            "open_questions": [],
         }
         for i, sid in enumerate(_ids_in(prompt_text))
     ]

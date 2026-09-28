@@ -80,7 +80,7 @@ class Preferences(Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     interest_profile: Mapped[dict] = mapped_column(JSONB, default=dict)
-    target_minutes: Mapped[int] = mapped_column(Integer, default=6, nullable=False)
+    target_minutes: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     tone: Mapped[str | None] = mapped_column(String, nullable=True)
     host_a: Mapped[dict] = mapped_column(JSONB, default=dict)
     host_b: Mapped[dict] = mapped_column(JSONB, default=dict)

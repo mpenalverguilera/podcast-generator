@@ -9,7 +9,7 @@ the extra `pipeline_steps` row (docs/DECISIONS.md D-30)."""
 from app.adapters.llm.protocol import LLM
 from app.config import Settings, get_settings
 from app.prompts import load_prompt
-from app.schemas import GroundingReport, Script, UnsupportedClaim, Usage
+from app.schemas import GroundingChecks, GroundingReport, Script, UnsupportedClaim, Usage
 
 # One limit for what the section writer sees and what the grounder checks
 # against, so a true fact from an article's tail isn't flagged just because
@@ -68,11 +68,32 @@ def check(
 ) -> tuple[GroundingReport, Usage]:
     settings = settings or get_settings()
     prompt = load_prompt("grounding_check", sections=_sections_block(script, sources, context_ids))
-    return llm.structured(
+    result, usage = llm.structured(
         prompt,
-        GroundingReport,
+        GroundingChecks,
         model=settings.model_grounding,
         reasoning=settings.model_grounding_reasoning,
+    )
+    assert isinstance(result, GroundingChecks)
+    return to_report(result), usage
+
+
+def to_report(result: GroundingChecks) -> GroundingReport:
+    """Keeps only the checks judged unsupported (D-65): "supported" and
+    "take" rows exist so the model reasons before it flags, not to be acted
+    on. The evidence the model cited becomes the flag's reason."""
+    return GroundingReport(
+        unsupported=[
+            UnsupportedClaim(
+                section_index=c.section_index,
+                turn_index=c.turn_index,
+                claim=c.claim,
+                reason=c.evidence,
+                suggested_fix=c.suggested_fix,
+            )
+            for c in result.checks
+            if c.verdict == "unsupported"
+        ][:30]
     )
 
 

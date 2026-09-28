@@ -1,5 +1,4 @@
 import logging
-import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -9,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters import Adapters
 from app.models import Article, ArticleScore, Episode, EpisodeItem
+from app.pipeline.budget import STORY_MINUTES, Depth, story_minutes
 from app.pipeline.context import load_profile, recent_headlines
 from app.schemas import ArticleScoreResult, InterestProfile, Topic, Usage
 
@@ -17,8 +17,11 @@ logger = logging.getLogger(__name__)
 _MIN_SCORE = 0.3
 _RECENCY_HALF_LIFE_DAYS = 3.0
 _UNDATED_DECAY = 0.5
-_MIN_STORY_COUNT = 3
-_MINUTES_PER_STORY = 1.2
+_MIN_STORY_COUNT = 2
+# D-65: a story still fits when it overshoots what's left by at most this
+# much; the outline's word ceilings are scaled to the exact budget anyway.
+_FIT_SLACK_MINUTES = 0.25
+_MIN_TOPIC_CAP_MINUTES = 3.0
 _CLASSIFY_CONCURRENCY = 8
 _FOCUS_TOPIC = "focus"
 
@@ -36,6 +39,11 @@ class Candidate:
     already_covered: bool
     published_at: datetime | None
     is_stale: bool = False
+    depth: Depth = "headlines"  # the depth of `topic` in the profile; focus is "deep"
+
+    @property
+    def minutes(self) -> float:
+        return STORY_MINUTES[self.depth]
 
 
 @dataclass(frozen=True)
@@ -64,26 +72,29 @@ def recency_decay(
     return 0.5 ** (age_days / half_life_days)
 
 
-def story_count_for(target_minutes: int) -> int:
-    return max(_MIN_STORY_COUNT, round(target_minutes / _MINUTES_PER_STORY))
-
-
 def select_stories(
     candidates: list[Candidate], target_minutes: int, now: datetime
 ) -> list[Selected]:
     """Pure selection logic (docs/phases/03-pipeline.md step 1 / ARCHITECTURE
     §5.3): final = relevance x newsworthy x recency decay; drop already_covered,
-    is_stale (D-61) and final < 0.3. Then, in order (D-61):
+    is_stale (D-61) and final < 0.3.
+
+    D-65: stories are chosen against a *minutes* budget, not a story count.
+    Each story costs its topic's depth -- 3 min deep (and the focus story),
+    1.5 min headlines -- and fits while its cost is within what's left (plus
+    a quarter-minute slack). In order (D-61):
       1. one focus-request slot, reserved first, opening the episode;
       2. topic coverage: each remaining topic, strongest first (by its best
-         candidate's score), gets its best eligible candidate while slots remain,
-         so no topic gets a second story before every topic has had one;
-      3. the rest by score, under a per-topic cap for variety.
-    After the focus slot, stories are ordered by score. Same-event collapsing is
-    cut (D-22).
+         candidate's score), gets its best eligible candidate that fits;
+      3. the rest by score, while no topic takes more than half the minutes
+         (at least 3 -- two headline stories; its first story is always allowed).
+    At least two stories are taken when there are two eligible candidates,
+    even if the second overshoots. After the focus slot, stories are ordered
+    by score. Same-event collapsing is cut (D-22).
     """
-    story_count = story_count_for(target_minutes)
-    per_topic_cap = math.ceil(story_count / 2)
+    budget = story_minutes(target_minutes)
+    # At most half the story minutes per topic, but never less than two headline stories' worth.
+    per_topic_cap = max(budget / 2, _MIN_TOPIC_CAP_MINUTES)
 
     scored: list[tuple[float, Candidate]] = []
     for c in candidates:
@@ -98,17 +109,29 @@ def select_stories(
     focus: Candidate | None = None
     rest: list[tuple[float, Candidate]] = []
     selected_article_ids: set[int] = set()
-    per_topic_count: dict[str, int] = {}
+    per_topic_minutes: dict[str, float] = {}
+    used = 0.0
 
-    def _can_take(candidate: Candidate) -> bool:
-        return (
-            candidate.article_id not in selected_article_ids
-            and per_topic_count.get(candidate.topic, 0) < per_topic_cap
-        )
+    def _count() -> int:
+        return len(rest) + (focus is not None)
+
+    def _fits(candidate: Candidate) -> bool:
+        if candidate.article_id in selected_article_ids:
+            return False
+        if _count() < _MIN_STORY_COUNT:
+            return True
+        topic_used = per_topic_minutes.get(candidate.topic, 0.0)
+        if topic_used and topic_used + candidate.minutes > per_topic_cap:
+            return False
+        return used + candidate.minutes <= budget + _FIT_SLACK_MINUTES
 
     def _take(candidate: Candidate) -> None:
+        nonlocal used
         selected_article_ids.add(candidate.article_id)
-        per_topic_count[candidate.topic] = per_topic_count.get(candidate.topic, 0) + 1
+        per_topic_minutes[candidate.topic] = (
+            per_topic_minutes.get(candidate.topic, 0.0) + candidate.minutes
+        )
+        used += candidate.minutes
 
     # 1. Focus slot.
     focus_scored = [pair for pair in scored if pair[1].topic == _FOCUS_TOPIC]
@@ -116,25 +139,19 @@ def select_stories(
         focus = focus_scored[0][1]
         _take(focus)
 
-    def _slots_left() -> bool:
-        return len(rest) + (focus is not None) < story_count
-
     # 2. Topic coverage. `scored` is sorted, so the first time a topic appears is its best
-    # candidate, and topics are visited strongest first.
+    # candidate, and topics are visited strongest first. A topic whose best candidate doesn't
+    # fit falls through to its next one.
     for final, c in scored:
-        if not _slots_left():
-            break
-        if c.topic == _FOCUS_TOPIC or per_topic_count.get(c.topic, 0) > 0:
+        if c.topic == _FOCUS_TOPIC or c.topic in per_topic_minutes:
             continue
-        if _can_take(c):
+        if _fits(c):
             rest.append((final, c))
             _take(c)
 
     # 3. Fill by score.
     for final, c in scored:
-        if not _slots_left():
-            break
-        if _can_take(c):
+        if _fits(c):
             rest.append((final, c))
             _take(c)
 
@@ -144,6 +161,13 @@ def select_stories(
         Selected(article_id=c.article_id, topic=c.topic, story_id=f"s{i + 1}", position=i)
         for i, c in enumerate(ordered)
     ]
+
+
+def _depth_for(profile: InterestProfile, topic: str) -> Depth:
+    if topic == _FOCUS_TOPIC:
+        return "deep"
+    match = next((t for t in profile.topics if t.name == topic), None)
+    return match.depth if match else "headlines"
 
 
 def _profile_for_topic(
@@ -247,6 +271,7 @@ def run(episode: Episode, adapters: Adapters, db: Session) -> Usage:
                 already_covered=result.already_covered,
                 published_at=articles[row.article_id].published_at,
                 is_stale=result.is_stale,
+                depth=_depth_for(profile, row.topic or ""),
             )
         )
         if result.is_stale:

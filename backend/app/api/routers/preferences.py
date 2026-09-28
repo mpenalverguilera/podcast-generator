@@ -22,8 +22,8 @@ from app.auth import create_media_token, current_user, verify_media_token
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import Event, User
+from app.pipeline.budget import MAX_MINUTES, MIN_MINUTES, estimated_story_count
 from app.pipeline.profile import GUIDED_QUESTIONS, extract_profile
-from app.pipeline.rank import story_count_for
 from app.scheduler import sync_user_schedule
 from app.schemas import InterestProfile
 from app.voices import CURATED_VOICES
@@ -82,11 +82,18 @@ def get_preferences(user: User = Depends(current_user)) -> PreferencesOut:
 
 
 @router.get("/preferences/length-options", response_model=list[LengthOption])
-def length_options() -> list[LengthOption]:
-    """How many stories each episode length gets, for the settings slider's
-    "~6 min · ~5 stories" estimate -- served from the ranker's own rule so
-    the frontend doesn't keep a copy that can drift."""
-    return [LengthOption(minutes=m, stories=story_count_for(m)) for m in range(3, 13)]
+def length_options(user: User = Depends(current_user)) -> list[LengthOption]:
+    """The allowed episode lengths and roughly how many stories each gets, for
+    the settings slider's "~10 min · ~4 stories" hint -- served from the
+    ranker's own minutes-per-depth rule (D-65) and this user's topic depths,
+    so the frontend doesn't keep a copy that can drift."""
+    prefs = user.preferences
+    profile = InterestProfile.model_validate(prefs.interest_profile or {}) if prefs else None
+    depths = [t.depth for t in profile.topics] if profile else []
+    return [
+        LengthOption(minutes=m, stories=estimated_story_count(m, depths))
+        for m in range(MIN_MINUTES, MAX_MINUTES + 1)
+    ]
 
 
 @router.put("/preferences", response_model=PreferencesOut)

@@ -36,5 +36,5 @@ def test_defaults_match_dot_env_example() -> None:
     assert defaults["llm_provider"] == "openai"
     assert defaults["classifier_provider"] == "openai"
     assert defaults["tts_provider"] == "elevenlabs"
-    assert defaults["max_tts_chars_per_episode"] == 12000
+    assert defaults["max_tts_chars_per_episode"] == 18000
     assert defaults["daily_spend_cap_usd"] == 5.0

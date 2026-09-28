@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import hash_password
 from app.config import get_settings
 from app.models import Preferences, User
+from app.pipeline.budget import DEFAULT_MINUTES
 
 
 def create_user(
@@ -28,7 +29,7 @@ def create_user(
         Preferences(
             user_id=user.id,
             interest_profile={"topics": [], "avoid": []},
-            target_minutes=6,
+            target_minutes=DEFAULT_MINUTES,
             host_a={"name": "Alex", "voice_id": settings.default_voice_host_a},
             host_b={"name": "Sam", "voice_id": settings.default_voice_host_b},
             timezone="UTC",

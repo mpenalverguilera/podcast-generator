@@ -1,6 +1,7 @@
 from app.pipeline import grounding
 from app.schemas import (
-    GroundingReport,
+    ClaimCheck,
+    GroundingChecks,
     RenderedPrompt,
     Script,
     Section,
@@ -18,17 +19,17 @@ def _turn(speaker: str, text: str) -> Turn:
 
 class _GroundingOnlyLLM:
     """Just enough of the LLM protocol for grounding.check() unit tests: a
-    canned GroundingReport, with the rendered prompt text captured so tests
+    canned GroundingChecks, with the rendered prompt text captured so tests
     can assert on what the model actually saw."""
 
-    def __init__(self, report: GroundingReport) -> None:
-        self._report = report
+    def __init__(self, checks: GroundingChecks) -> None:
+        self._checks = checks
         self.last_prompt: RenderedPrompt | None = None
 
     def structured(self, prompt, schema, model, reasoning):
-        assert schema is GroundingReport
+        assert schema is GroundingChecks
         self.last_prompt = prompt
-        return self._report, Usage(provider="fake", model=model, cost_usd=0.002, latency_ms=7)
+        return self._checks, Usage(provider="fake", model=model, cost_usd=0.002, latency_ms=7)
 
 
 def _script_with_marker(source_id: str) -> Script:
@@ -75,7 +76,7 @@ def _clean_script(source_id: str) -> Script:
 
 def test_check_sends_source_text_and_no_sources_note_to_the_model() -> None:
     scripted = _clean_script("a1")
-    llm = _GroundingOnlyLLM(GroundingReport(unsupported=[]))
+    llm = _GroundingOnlyLLM(GroundingChecks(checks=[]))
 
     report, usage = grounding.check(scripted, {"a1": "the real source text"}, llm)
 
@@ -91,7 +92,7 @@ def test_check_labels_context_sources_as_previous_story_only() -> None:
     clearly labeled block, so the checker can judge a bridge-in link without
     treating it as license for a new fact."""
     scripted = _clean_script("a1")
-    llm = _GroundingOnlyLLM(GroundingReport(unsupported=[]))
+    llm = _GroundingOnlyLLM(GroundingChecks(checks=[]))
 
     grounding.check(
         scripted,
@@ -114,15 +115,24 @@ def test_check_flags_a_planted_false_number_not_in_the_source() -> None:
     against a real episode for the demo, per docs/phases/04-quality.md)."""
     planted_script = _script_with_marker("a1")
     llm = _GroundingOnlyLLM(
-        GroundingReport(
-            unsupported=[
-                UnsupportedClaim(
+        GroundingChecks(
+            checks=[
+                ClaimCheck(
                     section_index=1,
                     turn_index=0,
                     claim=f"revenue hit ${_PLANTED_NUMBER}",
-                    reason="not in the source",
+                    evidence="not in the source",
+                    verdict="unsupported",
                     suggested_fix="drop the figure",
-                )
+                ),
+                ClaimCheck(
+                    section_index=1,
+                    turn_index=0,
+                    claim="that's a big quarter",
+                    evidence="a host's judgment, no new specific",
+                    verdict="take",
+                    suggested_fix="",
+                ),
             ]
         )
     )
@@ -131,7 +141,8 @@ def test_check_flags_a_planted_false_number_not_in_the_source() -> None:
         planted_script, {"a1": "the real source text, no dollar figures at all"}, llm
     )
 
-    assert len(report.unsupported) == 1
+    assert len(report.unsupported) == 1  # the "take" row is not a flag
+    assert report.unsupported[0].reason == "not in the source"
     assert _PLANTED_NUMBER in llm.last_prompt.text  # the planted claim reached the model
     assert report.unsupported[0].section_index == 1
     assert report.unsupported[0].turn_index == 0

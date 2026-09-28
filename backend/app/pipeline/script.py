@@ -36,6 +36,7 @@ from app.models import (
     StepStatus,
 )
 from app.pipeline import context, grounding
+from app.pipeline.budget import WORDS_PER_MINUTE, frame_word_targets, word_budget
 from app.pipeline.script_trace import ScriptTrace, claims_json, turns_diff_md, turns_md
 from app.prompts import load_prompt
 from app.schemas import (
@@ -55,12 +56,6 @@ from app.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# D-28 measured eleven_v3 at 973 words -> 428 s, about 136 words per minute
-# once pauses and section breaks are counted; 150 overshot by ~19%.
-_WORDS_PER_MINUTE = 135
-_FRAME_SHARE = 0.12  # intro + outro share of the total budget
-_MIN_FRAME_WORDS = 60
-_INTRO_SHARE_OF_FRAME = 0.65
 _MAX_WORDS_SCALE_CAP = 1.3  # D-62: scaling a section's ceiling UP is capped; scaling down isn't
 _MAX_WORDS_OVERAGE = 0.10  # D-62: only exceeding the ceiling by >10% is a validation error
 _MAX_WORDS_FLOOR = 0.5  # D-62: under half the ceiling is a warning only, never an error
@@ -70,7 +65,10 @@ _MIN_STORY_TURNS = 3
 _WORD_COUNT_ERROR = "word count"
 _FOCUS_TOPIC = "focus"  # rank.py's synthetic topic for the focus request
 _AUDIO_TAG_RE = re.compile(r"\[[^\]]*\]")
-_STALENESS_SNIPPET_CHARS = 500
+# D-65: the outline reads this much of each full-text source's body (was a
+# 500-char staleness snippet), so its take and key facts come from the
+# article's evidence and caveats, not only Exa's highlights.
+_OUTLINE_BODY_CHARS = 3000
 
 # D-62: narrated-personalization and template-closer phrases, banned outright
 # in every story section; the frame's intro may say "you asked about" once,
@@ -162,19 +160,6 @@ def word_count(turns: list[Turn]) -> int:
 
 def script_word_count(sections: list[Section]) -> int:
     return sum(word_count(s.turns) for s in sections)
-
-
-def word_budget(target_minutes: int) -> tuple[int, int, int]:
-    """(total, frame, story) words. The frame is the intro + outro."""
-    total = target_minutes * _WORDS_PER_MINUTE
-    frame = max(_MIN_FRAME_WORDS, round(_FRAME_SHARE * total))
-    return total, frame, total - frame
-
-
-def frame_word_targets(frame_budget: int) -> tuple[int, int]:
-    """(intro, outro) word targets within the frame budget."""
-    intro = round(frame_budget * _INTRO_SHARE_OF_FRAME)
-    return intro, frame_budget - intro
 
 
 def scale_max_words(max_words: list[int], story_budget: int) -> list[int]:
@@ -426,11 +411,13 @@ def _build_source(
 
 
 def _articles_block(sources: list[_Source]) -> str:
-    """D-62: besides highlights, each full-text source also gets a ~500-char
-    "full text opens" snippet -- where a byline or photo caption date usually
-    sits -- so the outline can catch a source whose *stored* date is wrong
-    (confirmed live: article a655's photo caption reads "Saturday Feb. 28,
-    2026" while its stored published_at was the day of the fetch)."""
+    """Besides highlights, each full-text source gets the first
+    `_OUTLINE_BODY_CHARS` of its body (D-65; D-62 showed only a 500-char
+    snippet). The opening is where a byline or photo caption date usually
+    sits, so the outline can still catch a source whose *stored* date is
+    wrong (D-62: article a655's caption read "Saturday Feb. 28, 2026" while
+    its stored published_at was the day of the fetch); the rest is the
+    evidence the outline's take and key facts are planned from."""
     lines = []
     for s in sources:
         date = s.article.published_at.date().isoformat() if s.article.published_at else "undated"
@@ -442,9 +429,9 @@ def _articles_block(sources: list[_Source]) -> str:
         highlights = s.article.highlights or [(s.article.content or "")[:400]]
         lines += [f"    - {h.strip()}" for h in highlights if h and h.strip()]
         if not s.thin and s.article.content:
-            snippet = " ".join(s.article.content[:_STALENESS_SNIPPET_CHARS].split())
-            if snippet:
-                lines.append(f"    - full text opens: {snippet}")
+            body = " ".join(s.article.content[:_OUTLINE_BODY_CHARS].split())
+            if body:
+                lines.append(f"    - article text (first {_OUTLINE_BODY_CHARS} chars): {body}")
     return "\n".join(lines)
 
 
@@ -977,7 +964,7 @@ def _inputs_md(
         f"Hosts: {names['host_a']} (host_a), {names['host_b']} (host_b). Tone: {tone}",
         f"Recent headlines: {'; '.join(headlines) or '(none)'}",
         f"Today: {today}. Window start: {window_start}.\n",
-        f"## Budget\nTarget {episode.target_minutes} min x {_WORDS_PER_MINUTE} wpm = {total} "
+        f"## Budget\nTarget {episode.target_minutes} min x {WORDS_PER_MINUTE} wpm = {total} "
         f"words: frame {frame}, stories up to {total - frame}\n",
         f"## Selected articles ({len(sources)})",
         "| id | outlet | date | title | topic | content |",
@@ -998,8 +985,10 @@ def _outline_md(outline: Outline, raw_max_words: list[int]) -> str:
             f"## {s.story_id}: {s.headline}",
             f"- sources: {', '.join(s.source_ids)} | topic: {s.topic_label} | depth: {s.depth}",
             f"- max words: {s.max_words} (model asked for {raw})",
-            f"- angle: {s.angle}",
+            f"- take (angle): {s.angle}",
             f"- stakes: {s.stakes}",
+            f"- tension: {s.tension or '-'}",
+            f"- open questions: {'; '.join(s.open_questions) or '-'}",
             f"- bridge in: {s.bridge_in or '-'}",
             "- key facts:",
             *[f"  - {f}" for f in s.key_facts],

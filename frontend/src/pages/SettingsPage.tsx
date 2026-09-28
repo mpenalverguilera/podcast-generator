@@ -95,6 +95,8 @@ export function SettingsPage() {
       // has_profile lives on /me; refresh it so the Episodes link unlocks
       // right after the first save instead of on the next page load.
       void queryClient.invalidateQueries({ queryKey: ['me'] })
+      // The stories-per-length hint depends on the saved topics' depths (D-65).
+      void queryClient.invalidateQueries({ queryKey: ['length-options'] })
       if (draft) setSavedSnapshot(JSON.stringify(draft))
       setSavedMessage(true)
       setTimeout(() => setSavedMessage(false), 2000)
@@ -130,8 +132,8 @@ export function SettingsPage() {
           </label>
           <input
             type="range"
-            min={3}
-            max={12}
+            min={lengthOptions[0]?.minutes ?? 6}
+            max={lengthOptions[lengthOptions.length - 1]?.minutes ?? 20}
             value={draft.target_minutes}
             onChange={(e) => update({ target_minutes: Number(e.target.value) })}
             className="w-full accent-accent"

@@ -177,7 +177,7 @@ def test_length_options(db) -> None:
     resp = client.get("/preferences/length-options", headers=auth_headers(token))
     assert resp.status_code == 200, resp.text
     options = resp.json()
-    assert [o["minutes"] for o in options] == list(range(3, 13))
+    assert [o["minutes"] for o in options] == list(range(6, 21))
     stories = [o["stories"] for o in options]
     assert all(n >= 1 for n in stories) and stories == sorted(stories)
 
