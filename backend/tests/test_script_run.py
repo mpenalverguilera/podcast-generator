@@ -359,7 +359,7 @@ def test_focus_is_rendered_as_the_listener_request_never_the_word_focus(db) -> N
     assert 'Listener\'s request for this episode: "open-weight models"' in outline_prompt
     assert "— focus —" not in outline_prompt
     assert "whose topic is the listener's request" in outline_prompt
-    assert "the listener asked about this" in llm.prompts("FrameOutput")[0]
+    assert "never say it was requested" in llm.prompts("FrameOutput")[0]
 
 
 def test_no_focus_section_means_no_you_asked_about(db) -> None:

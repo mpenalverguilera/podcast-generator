@@ -922,3 +922,9 @@ A read of the v4 script for entertainment value found it accurate but flat: all 
 **Result, rescript of episode 1 (v5 → v6):** fact flags initial 1 → 0; tag fixes 1 (a `[chuckles]` on a shipment schedule removed); the 3 remaining tags all fit their lines; `tension` set on 2 of 4 stories (lead included); $0.169 → $0.152; 1,126 → 1,140 words.
 
 **Regressions / open:** optional short turns became none (9 → 1; turn-length stdev 15.4 → 10.7). The first story says "those ten seconds from the cold open" aloud and then restates the ten-second fact later in the section. The preview narrates personalization ("You wanted to know about...") and hedges. Citrix hedges despite a null `tension`.
+
+## D-69 — The intro never narrates the listener's request (2026-09-28)
+
+The v6 preview said "You wanted to know about new voice AI agents..." because the D-60-era frame rule told it to say "you asked about X" once when a focus story exists. The user doesn't want the personalization said aloud: leading with the requested story is the acknowledgement. `focus_rule` now tells the frame to start the preview with that story without saying it was requested, and `validate_frame` rejects a short list of request-narrating phrases ("you asked about", "you wanted to know", "your request", ...) in any intro, focus or not.
+
+**Open, under discussion:** when a focus was requested but no article matched, the episode currently ignores the request silently; one honest line ("not much new on X this week") may be the one case worth saying. Also open: the phrase list only catches known wordings.

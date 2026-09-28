@@ -270,11 +270,24 @@ def only_word_count_errors(errors: list[str]) -> bool:
     return bool(errors) and all(e.startswith(_WORD_COUNT_ERROR) for e in errors)
 
 
-def validate_frame(frame: FrameOutput, host_names: list[str], has_focus_section: bool) -> list[str]:
+# D-69: phrases that say the personalization out loud; the frame must never use them.
+_REQUEST_NARRATION = (
+    "you asked about",
+    "you asked for",
+    "you wanted to know",
+    "you wanted to hear",
+    "as you asked",
+    "as you requested",
+    "your request",
+)
+
+
+def validate_frame(frame: FrameOutput, host_names: list[str]) -> list[str]:
     """Pure checks on the frame call's output (D-62, replacing check_polish):
     turn-count shape, the shared turn rules on the intro (cold open + preview
-    combined) and the outro, and that "you asked about" appears at most once,
-    and only if there is a focus section to justify it."""
+    combined) and the outro, and that the intro never narrates the listener's
+    request (D-69: "you asked about" was allowed once with a focus section
+    until then; the user doesn't want the personalization said aloud)."""
     errors: list[str] = []
     if not (1 <= len(frame.cold_open_turns) <= 2):
         errors.append(f"cold_open_turns must be 1-2 turns, got {len(frame.cold_open_turns)}")
@@ -289,11 +302,10 @@ def validate_frame(frame: FrameOutput, host_names: list[str], has_focus_section:
     errors += [
         f"outro: {e}" for e in validate_section(frame.outro_turns, host_names, None, is_story=False)
     ]
-    asked = sum(t.text.lower().count("you asked about") for t in intro_turns)
-    if asked > 1 or (asked and not has_focus_section):
-        errors.append(
-            '"you asked about" must appear at most once, and only if a focus section exists'
-        )
+    intro_text = " ".join(t.text.lower() for t in intro_turns)
+    said = [p for p in _REQUEST_NARRATION if p in intro_text]
+    if said:
+        errors.append(f"the intro must not narrate the listener's request: {', '.join(said)}")
     return errors
 
 
@@ -886,8 +898,9 @@ def _frame(
             else "There is no listener request to answer in this episode."
         ),
         focus_rule=(
-            "Say once, briefly, that the listener asked about this and that's where the "
-            "episode starts."
+            "The first story answers the listener's request: start the preview with it, like any "
+            'other story -- never say it was requested (no "you asked about", "you wanted to '
+            'know", "your request").'
             if has_focus_section
             else 'Do not say "you asked about..." -- there is no request to answer this time.'
         ),
@@ -897,7 +910,7 @@ def _frame(
     frame_out, usage = run.write(prompt, FrameOutput, "frame")
     assert isinstance(frame_out, FrameOutput)
     host_names = list(run.names.values())
-    errors = validate_frame(frame_out, host_names, has_focus_section)
+    errors = validate_frame(frame_out, host_names)
     frame_words = word_count(
         [*frame_out.cold_open_turns, *frame_out.preview_turns, *frame_out.outro_turns]
     )
@@ -912,7 +925,7 @@ def _frame(
         )
         frame_out, usage = run.write(retry, FrameOutput, "frame_retry")
         assert isinstance(frame_out, FrameOutput)
-        errors = validate_frame(frame_out, host_names, has_focus_section)
+        errors = validate_frame(frame_out, host_names)
         run.record("frame_retry", usage)
         if errors:
             raise RuntimeError(f"frame invalid after retry: {'; '.join(errors)}")
