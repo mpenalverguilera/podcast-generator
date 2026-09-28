@@ -887,3 +887,15 @@ Built `scripts/export_sample.py` (run from repo root) to turn a `ready` episode 
   2. A new tic: "Exactly." / "Agreed." opens the closing turn, and the writer says "My take:" aloud.
   3. Every section ends on doubt ("unproven", "no decision yet"), and so does the outro: `tension` / `open_questions` are applied to every story.
 - The 10-minute depth budget was not exercised (`rescript` keeps the old ranking).
+
+## D-66 — Writer/grounder see highlights; section_writer.v4 and outline.v4 (2026-09-28)
+
+**Source mismatch confirmed, but not as paywall stubs.** Episode 1 (fresh 10-minute generate, sample profile): the Anthropic article had a 17.7k-char body, and the five grounding flags on its section were facts the outline had planned from *highlights* (AWS/Google/Azure availability, the API model ID, the verification programme) that sit at chars ~16k of the body, past `SOURCE_CHARS` (12,000). The outline sees highlights + first 3k chars; the writer and grounder saw only the body, truncated. Fix: `_build_source` now puts the highlights first, then the body, so the truncation cuts the tail of a long body and never Exa's picked passages. Thin (highlights-only) sources are unchanged. The "body under ~1,500 chars counts as thin" idea from the handoff is **not** built: no stubs appeared in this run (bodies 2.9k–17.7k), so there is no evidence for it.
+
+**Prompts (v3 is recorded on an episode, so new files):**
+- `section_writer.v4`: no bare agreement openers ("Exactly.", "Agreed.", "Right."); a host who agrees adds something new; no "My take:" aloud; sections end on a consequence, a concrete date/event, or a sharp line, and on an open question only when it is the heart of the story. `tension` null means no invented doubt.
+- `outline.v4`: `tension` and `open_questions` only when central (guide: at most ~1 story in 3).
+
+**Result, same 4 articles, rescript of episode 1 (v3 → v4):** grounding flags initial 7 → 1 (final 0 both); scripting+grounding $0.16 → $0.15; 1,194 words vs 1,350 budget. Bare-agreement openers 0, "My take" 0, questions 0. `tension` set on 1 of 4 stories (was 4 of 4). Endings varied; the outro still leans on "proven vs promised", noted below.
+
+**Open:** the outro still closes on a doubt theme ("separating what's promised from what's proven"); the depth budget produced 4 stories for 10 minutes and the script is ~12% under budget, within tolerance; audio not yet generated (D-65 said audio only at the end); one sample is not a distribution, so re-run on a second profile before calling v4 done. Cost of the 10-minute scripting is ~$0.16.

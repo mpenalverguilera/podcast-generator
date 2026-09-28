@@ -404,9 +404,16 @@ def _build_source(
     outlet = _raw_domain(article.outlet, article.url)
     date = article.published_at.date().isoformat() if article.published_at else "undated"
     kind = "highlights only: thin source" if thin else "full text"
-    body = article.content or "\n".join(article.highlights or [])
     header = f"{outlet} — {date} — {article.title or '(untitled)'} ({kind})"
-    text = f"{header}\n{body}"[: grounding.SOURCE_CHARS]
+    highlights = "\n".join(f"- {h.strip()}" for h in article.highlights or [] if h and h.strip())
+    # D-66: the outline plans key_facts from highlights + body, so the writer and
+    # grounder must see the highlights too. They come first so the SOURCE_CHARS
+    # cut drops the tail of a long body, never the passages Exa picked out.
+    if article.content and highlights:
+        text = f"{header}\nHighlights:\n{highlights}\n\nArticle text:\n{article.content}"
+    else:
+        text = f"{header}\n{article.content or highlights}"
+    text = text[: grounding.SOURCE_CHARS]
     return _Source(short_id(article.id), article, topic, label, depth, thin, outlet, text)
 
 

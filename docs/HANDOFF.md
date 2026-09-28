@@ -8,18 +8,14 @@ Read `docs/DECISIONS.md` D-65 first (what changed and the first real run's resul
   episodes (default 10) with depth-based selection in `rank.py` / `app/pipeline/budget.py`.
 - First real rescript: the question->answer pattern is gone; three problems remain (see D-65).
 
-## Next steps (agreed direction, not yet built)
-1. Confirm the source mismatch: are articles 98/130 paywall stubs? Needs a real generate here (the
-   user's local DB is not in this container), then inspect `articles.content` vs `highlights`.
-   If confirmed: `_build_source` should always include highlights in the text the writer and
-   grounder see, and a body under ~1,500 chars should count as thin.
-2. New prompt versions (v3 is already recorded on an episode, so don't edit it):
-   - section_writer.v4: no reflex "Exactly." / "Agreed." / "My take:"; a host who agrees adds
-     something new; vary section endings (consequence, practical implication, or an open question
-     only when it is the heart of the story).
-   - outline.v4: `tension` / `open_questions` only when central -- not every story needs doubt.
-3. Fresh `generate --minutes 10` to exercise the depth budget, then iterate with `rescript` on
-   that same episode (identical articles). Audio only at the end.
+## Done in the follow-up session (D-66)
+- Source mismatch: confirmed (facts past `SOURCE_CHARS` reached the outline only via highlights); `_build_source` now includes highlights first. Not paywall stubs.
+- `section_writer.v4` and `outline.v4` written and measured on a fresh 10-minute episode (id 1 in the container DB): tics gone, flags 7 -> 1.
+
+## Next steps
+1. Check the outro: it still closes on "promised vs proven". Consider a frame-prompt version (new file) if it persists on a second profile.
+2. Run another profile / focus to confirm v4 generalises, then `generate` with real audio once (mind `MAX_TTS_CHARS_PER_EPISODE`), listen, and export the sample.
+3. Update `solution.md` with D-65/D-66 if phase 08 is still open.
 
 ## Environment in a cloud session
 The provider keys arrive as environment variables. `.env` paths are sandbox-blocked, so don't create

@@ -1,0 +1,66 @@
+You are fact-checking a two-host news podcast script against the source articles it was written from.
+
+For each section, go through every turn and list each statement that could be checked: facts,
+numbers, dates, quotes, attributions, and the hosts' interpretations. Skip greetings, sign-offs,
+pure reactions ("that's wild") and questions. For each statement, first write `evidence` -- what the
+section's sources actually say about it, quoted or closely paraphrased, or "not in the sources" --
+and only then give the `verdict`:
+- "supported": the sources say it, even if loosely paraphrased.
+- "take": a host's interpretation, judgment, comparison or prediction that adds no new specific
+  (no number, name, date, quote or event beyond what the sources say). Allowed, even when stated
+  confidently without "I think".
+- "unsupported": a fact, number, date, quote or event that isn't in (or is contradicted by) the
+  sources; an attribution to an outlet, person or study the sources don't mention; an invented
+  specific where the source is only general; or a "first", "only", "biggest" or "record" claim the
+  sources don't make.
+For an "unsupported" verdict, give a `suggested_fix` that stays natural for spoken audio while using
+only what the sources actually say; for the other verdicts leave `suggested_fix` empty.
+
+Examples of the line between a take and a fact:
+- "That's the part call centers should care about." -> take.
+- "So the launch is really about timing, not voice quality." -> take, if the source describes the
+  timing change.
+- "That's the first state to sue an AI lab." -> unsupported unless a source says "first".
+- "Which could cut their bill in half." -> unsupported: "in half" is a new number.
+- "The report doesn't name any customers." -> supported if the source indeed names none.
+
+A section with no sources listed has no supporting material at all -- any factual statement in it
+is unsupported (a take about the episode's stories is still a take).
+
+Some sections also carry a block labeled "Previous story" after their own sources. That block is
+given only so you can judge whether this section's link back to the previous story is accurate. It
+is never a valid source for a *new* fact this section states about its own topic -- a specific new
+number, name, date or quote must still come from this section's own sources above it.
+
+The writers followed this policy:
+
+Grounding policy:
+- Every number, name, date, quote and event must come from this section's sources. No outside
+  knowledge, no guessed figures, no invented specifics.
+- The hosts MAY interpret, judge, compare and predict in their own voice, without hedging, as long
+  as it adds no new specific: no new number, name, date, quote or event, and no "first", "only",
+  "biggest" or "record" claim the sources don't make.
+- A take is fine: "That's the part call centers should care about." A new fact is not: "That's the
+  first state to sue an AI lab" -- that needs a source.
+- If sources disagree, say so and name both outlets.
+
+An outlet's name is a supported attribution when the section's sources come from that outlet (the
+source header shows the outlet), even if the spoken name isn't a literal reading of that header (a
+host may reasonably call "nytimes.com" "The New York Times"). A generic reference in place of a name
+-- "one report", "a trade site" -- is always supported: it names no specific outlet to get wrong.
+
+Script sections, with their sources:
+Section 0 (story, story_id='s2')
+Sources:
+[a290] www.outlet1.com — undated — Story 1 (full text)
+The company reported strong quarterly results and steady growth.
+Turns:
+  turn 0: This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. 
+  turn 1: This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. 
+  turn 2: This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. This is a fake sentence for testing scripts. 
+Previous story -- only to support a link back to it, not a source for this section's own new facts:
+[a289] www.outlet0.com — undated — Story 0 (full text)
+The company reported strong quarterly results and steady growth.
+
+Return one entry in `checks` per statement: its section_index and turn_index, the exact claim (a
+short quote from the turn), the evidence, the verdict, and the suggested_fix.

@@ -1,0 +1,11 @@
+{
+  "section": "s2",
+  "checked_against": [
+    "a301",
+    "a302"
+  ],
+  "context_previous_story": [
+    "a303"
+  ],
+  "flags": []
+}

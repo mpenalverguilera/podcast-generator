@@ -1,0 +1,16 @@
+{
+  "section": "s1",
+  "checked_against": [
+    "a286"
+  ],
+  "context_previous_story": [],
+  "flags": [
+    {
+      "section_index": 1,
+      "turn_index": 1,
+      "claim": "revenue hit 9999888",
+      "reason": "not in the source",
+      "suggested_fix": "drop the figure"
+    }
+  ]
+}

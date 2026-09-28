@@ -404,3 +404,16 @@ def test_outlet_domain_and_thin_sources_are_labelled_for_the_model(db) -> None:
     assert "www.outlet0.com —" in outline_prompt
     assert "highlights only" in outline_prompt
     assert "thin source" in llm.prompts("SectionDraft")[0]
+
+
+def test_writer_sources_carry_highlights_before_a_long_body(db) -> None:
+    """D-66: facts the outline planned from highlights must reach the writer and
+    grounder even when the body is longer than SOURCE_CHARS."""
+    episode, articles = _episode(db, 1)
+    articles[0].content = "Body sentence. " * 2000
+    articles[0].highlights = ["A fact only the highlight carries."]
+    llm = _StubLLM()
+    script.run(episode, _adapters(llm), db)
+
+    draft_prompt = llm.prompts("SectionDraft")[0]
+    assert "A fact only the highlight carries." in draft_prompt

@@ -1,0 +1,50 @@
+{
+  "outline": {
+    "cold_open_hook": "A fake hook.",
+    "sections": [
+      {
+        "story_id": "s1",
+        "source_ids": [
+          "a283"
+        ],
+        "topic_label": "fake topic",
+        "headline": "Fake headline 1",
+        "angle": "a fake angle",
+        "stakes": "a fake stake",
+        "depth": "headlines",
+        "max_words": 130,
+        "key_facts": [
+          "fake fact 1"
+        ],
+        "must_not_cover": [],
+        "bridge_in": null,
+        "tension": null,
+        "open_questions": []
+      },
+      {
+        "story_id": "s2",
+        "source_ids": [
+          "a284"
+        ],
+        "topic_label": "fake topic",
+        "headline": "Fake headline 2",
+        "angle": "a fake angle",
+        "stakes": "a fake stake",
+        "depth": "headlines",
+        "max_words": 130,
+        "key_facts": [
+          "fake fact 2"
+        ],
+        "must_not_cover": [],
+        "bridge_in": "a fake bridge",
+        "tension": null,
+        "open_questions": []
+      }
+    ],
+    "dropped": []
+  },
+  "model_max_words": [
+    100,
+    100
+  ]
+}
