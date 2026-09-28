@@ -879,3 +879,11 @@ Built `scripts/export_sample.py` (run from repo root) to turn a `ready` episode 
 - 254 tests pass; `ruff` and `tsc` are clean.
 
 **[VERIFY] Not yet measured on real providers.** This session's network policy blocked `api.openai.com`, `api.exa.ai` and `api.elevenlabs.io` (403 from the egress proxy), so no real episode was scripted with v3/v4. The planned check: rescript episode 2875 (and 15708–15710) with `SCRIPT_TRACE_DIR` set, then generate a fresh 10-minute episode for `sample@example.com`. Compare questions per story turn, "?/No." pairs, grounding flags initial → final, words vs budget and cost against the v2 exports, and listen to it.
+
+**First real run (rescript of episode 2875, 6 min, same 5 articles; run by the user locally; export in chat, not committed).** Scripting $0.178 / 175 s, grounding $0.009; 755 words vs 810; flags 17 → 1.
+- Worked: **0 questions in story sections** (v2: 7, e.g. "But does fewer tokens guarantee…?"). Takes stated as claims, pushback as statements. The ElevenLabs section (243 words, 0 flags) is the best section so far.
+- New problems:
+  1. **Florida (a130) collapsed to 66 empty words** after 9 flags, and Anthropic (a98) lost its Opus comparison after 5. Suspected cause, not yet confirmed: paywalled Forbes/Reuters bodies are short stubs. The outline sees highlights + body, but the writer and grounder see only `article.content or highlights` (`_build_source`), so facts planned from the highlights get flagged. Needs `SELECT id, length(content), left(content,300), highlights FROM articles WHERE id IN (98,130,174)`.
+  2. A new tic: "Exactly." / "Agreed." opens the closing turn, and the writer says "My take:" aloud.
+  3. Every section ends on doubt ("unproven", "no decision yet"), and so does the outro: `tension` / `open_questions` are applied to every story.
+- The 10-minute depth budget was not exercised (`rescript` keeps the old ranking).
