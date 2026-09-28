@@ -5,6 +5,8 @@ from app.schemas import (
     RenderedPrompt,
     Script,
     Section,
+    TagCheck,
+    TagFix,
     Turn,
     UnsupportedClaim,
     Usage,
@@ -193,3 +195,57 @@ def test_sum_usage_sums_cost_and_latency_keeps_provider_and_model() -> None:
     assert total.units_out == 9
     assert abs(total.cost_usd - 0.03) < 1e-9
     assert total.latency_ms == 180
+
+
+def _tag(verdict: str, tag: str, proposed: str | None = None, turn: int = 0) -> TagCheck:
+    return TagCheck(
+        section_index=0,
+        turn_index=turn,
+        tag=tag,
+        reacts_to="the line before",
+        verdict=verdict,
+        proposed_tag=proposed,
+    )
+
+
+def test_to_report_keeps_tag_swaps_and_removals_apart_from_fact_flags() -> None:
+    """D-68: tag fixes never count as fact flags."""
+    report = grounding.to_report(
+        GroundingChecks(
+            checks=[],
+            tags=[
+                _tag("fits", "[sighs]"),
+                _tag("swap", "[chuckles]", "[sighs]", turn=1),
+                _tag("remove", "[surprised]", turn=2),
+            ],
+        )
+    )
+    assert report.unsupported == []
+    assert [(f.old_tag, f.new_tag) for f in report.tag_fixes] == [
+        ("[chuckles]", "[sighs]"),
+        ("[surprised]", ""),
+    ]
+
+
+def test_apply_tag_fixes_changes_only_the_tag_never_the_words() -> None:
+    section = Section(
+        kind="story",
+        turns=[
+            _turn("host_a", "[chuckles] The breach exposed two million records."),
+            _turn("host_b", "[surprised] That's a startling number."),
+            _turn("host_a", "No tag here."),
+        ],
+    )
+    fixes = [
+        TagFix(section_index=1, turn_index=0, old_tag="[chuckles]", new_tag="[sighs]", reason=""),
+        TagFix(section_index=1, turn_index=1, old_tag="[surprised]", new_tag="", reason=""),
+        # The checker misread turn 2: there is no tag to replace, so it's skipped.
+        TagFix(section_index=1, turn_index=2, old_tag="[laughs]", new_tag="", reason=""),
+    ]
+    fixed, applied = grounding.apply_tag_fixes(section, fixes)
+    assert [t.text for t in fixed.turns] == [
+        "[sighs] The breach exposed two million records.",
+        "That's a startling number.",
+        "No tag here.",
+    ]
+    assert len(applied) == 2

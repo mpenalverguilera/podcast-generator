@@ -1,0 +1,62 @@
+[
+  {
+    "n": 1,
+    "step": "outline",
+    "section": null,
+    "prompt": "outline.v4",
+    "model": "gpt-6-sol",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.001,
+    "latency_ms": 5,
+    "prompt_file": "prompts/01_outline.txt"
+  },
+  {
+    "n": 2,
+    "step": "s1_write",
+    "section": 1,
+    "prompt": "section_writer.v4",
+    "model": "gpt-6-sol",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.001,
+    "latency_ms": 5,
+    "prompt_file": "prompts/02_s1_write.txt"
+  },
+  {
+    "n": 3,
+    "step": "s1_ground",
+    "section": 1,
+    "prompt": "grounding_check.v4",
+    "model": "gpt-6-luna",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.001,
+    "latency_ms": 5,
+    "prompt_file": "prompts/03_s1_ground.txt"
+  },
+  {
+    "n": 4,
+    "step": "frame",
+    "section": null,
+    "prompt": "frame.v2",
+    "model": "gpt-6-sol",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.001,
+    "latency_ms": 5,
+    "prompt_file": "prompts/04_frame.txt"
+  },
+  {
+    "n": 5,
+    "step": "frame_ground",
+    "section": null,
+    "prompt": "grounding_check.v4",
+    "model": "gpt-6-luna",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.001,
+    "latency_ms": 5,
+    "prompt_file": "prompts/05_frame_ground.txt"
+  }
+]

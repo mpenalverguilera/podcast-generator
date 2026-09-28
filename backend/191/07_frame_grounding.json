@@ -1,0 +1,23 @@
+{
+  "checked": [
+    {
+      "section": "intro",
+      "source_ids": [
+        "a289",
+        "a290"
+      ]
+    },
+    {
+      "section": "outro",
+      "source_ids": [
+        "a289",
+        "a290"
+      ]
+    }
+  ],
+  "flags": [],
+  "flags_after_patch": {
+    "intro": [],
+    "outro": []
+  }
+}

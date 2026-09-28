@@ -222,25 +222,22 @@ def _frame(cold_open: int = 1, preview: int = 1, outro: int = 1, asked: int = 0)
 
 
 def test_validate_frame_accepts_a_good_frame() -> None:
-    assert validate_frame(_frame(), _NAMES, has_focus_section=False) == []
+    assert validate_frame(_frame(), _NAMES) == []
 
 
 def test_validate_frame_flags_turn_count_shape() -> None:
-    assert any("cold_open_turns" in e for e in validate_frame(_frame(cold_open=3), _NAMES, False))
-    assert any("preview_turns" in e for e in validate_frame(_frame(preview=0), _NAMES, False))
-    assert any("outro_turns" in e for e in validate_frame(_frame(outro=3), _NAMES, False))
+    assert any("cold_open_turns" in e for e in validate_frame(_frame(cold_open=3), _NAMES))
+    assert any("preview_turns" in e for e in validate_frame(_frame(preview=0), _NAMES))
+    assert any("outro_turns" in e for e in validate_frame(_frame(outro=3), _NAMES))
 
 
-def test_validate_frame_you_asked_about_needs_a_focus_section_and_at_most_once() -> None:
-    assert any(
-        "you asked about" in e
-        for e in validate_frame(_frame(asked=1), _NAMES, has_focus_section=False)
+def test_validate_frame_never_allows_narrating_the_request() -> None:
+    """D-69: not even once, not even with a focus section."""
+    assert any("listener's request" in e for e in validate_frame(_frame(asked=1), _NAMES))
+    wanted = _frame().model_copy(
+        update={"preview_turns": [Turn(speaker="host_b", text="You wanted to know about chips.")]}
     )
-    assert validate_frame(_frame(asked=1), _NAMES, has_focus_section=True) == []
-    assert any(
-        "you asked about" in e
-        for e in validate_frame(_frame(asked=2), _NAMES, has_focus_section=True)
-    )
+    assert any("you wanted to know" in e for e in validate_frame(wanted, _NAMES))
 
 
 # --- patch / re-check machinery ---

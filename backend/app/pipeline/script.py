@@ -49,6 +49,7 @@ from app.schemas import (
     ScriptStep,
     Section,
     SectionDraft,
+    TagFix,
     Turn,
     UnsupportedClaim,
     Usage,
@@ -269,11 +270,24 @@ def only_word_count_errors(errors: list[str]) -> bool:
     return bool(errors) and all(e.startswith(_WORD_COUNT_ERROR) for e in errors)
 
 
-def validate_frame(frame: FrameOutput, host_names: list[str], has_focus_section: bool) -> list[str]:
+# D-69: phrases that say the personalization out loud; the frame must never use them.
+_REQUEST_NARRATION = (
+    "you asked about",
+    "you asked for",
+    "you wanted to know",
+    "you wanted to hear",
+    "as you asked",
+    "as you requested",
+    "your request",
+)
+
+
+def validate_frame(frame: FrameOutput, host_names: list[str]) -> list[str]:
     """Pure checks on the frame call's output (D-62, replacing check_polish):
     turn-count shape, the shared turn rules on the intro (cold open + preview
-    combined) and the outro, and that "you asked about" appears at most once,
-    and only if there is a focus section to justify it."""
+    combined) and the outro, and that the intro never narrates the listener's
+    request (D-69: "you asked about" was allowed once with a focus section
+    until then; the user doesn't want the personalization said aloud)."""
     errors: list[str] = []
     if not (1 <= len(frame.cold_open_turns) <= 2):
         errors.append(f"cold_open_turns must be 1-2 turns, got {len(frame.cold_open_turns)}")
@@ -288,11 +302,10 @@ def validate_frame(frame: FrameOutput, host_names: list[str], has_focus_section:
     errors += [
         f"outro: {e}" for e in validate_section(frame.outro_turns, host_names, None, is_story=False)
     ]
-    asked = sum(t.text.lower().count("you asked about") for t in intro_turns)
-    if asked > 1 or (asked and not has_focus_section):
-        errors.append(
-            '"you asked about" must appear at most once, and only if a focus section exists'
-        )
+    intro_text = " ".join(t.text.lower() for t in intro_turns)
+    said = [p for p in _REQUEST_NARRATION if p in intro_text]
+    if said:
+        errors.append(f"the intro must not narrate the listener's request: {', '.join(said)}")
     return errors
 
 
@@ -404,9 +417,16 @@ def _build_source(
     outlet = _raw_domain(article.outlet, article.url)
     date = article.published_at.date().isoformat() if article.published_at else "undated"
     kind = "highlights only: thin source" if thin else "full text"
-    body = article.content or "\n".join(article.highlights or [])
     header = f"{outlet} — {date} — {article.title or '(untitled)'} ({kind})"
-    text = f"{header}\n{body}"[: grounding.SOURCE_CHARS]
+    highlights = "\n".join(f"- {h.strip()}" for h in article.highlights or [] if h and h.strip())
+    # D-66: the outline plans key_facts from highlights + body, so the writer and
+    # grounder must see the highlights too. They come first so the SOURCE_CHARS
+    # cut drops the tail of a long body, never the passages Exa picked out.
+    if article.content and highlights:
+        text = f"{header}\nHighlights:\n{highlights}\n\nArticle text:\n{article.content}"
+    else:
+        text = f"{header}\n{article.content or highlights}"
+    text = text[: grounding.SOURCE_CHARS]
     return _Source(short_id(article.id), article, topic, label, depth, thin, outlet, text)
 
 
@@ -503,7 +523,10 @@ class _Run:
         index_map: list[int],
         label: str,
         context_by_local_index: dict[int, list[str]] | None = None,
-    ) -> list[UnsupportedClaim]:
+    ) -> tuple[list[UnsupportedClaim], list[TagFix]]:
+        """Fact flags and audio-tag fixes (D-68), both remapped to final
+        section indices. Tag fixes are counted in the step's note, never in
+        `flags`, so the fact-flag numbers stay comparable across versions."""
         checked = Script(title="", summary="", sections=sections)
         section = index_map[0] if len(index_map) == 1 else None
         llm = self.tracer.wrap(self.llm, label, section)
@@ -514,8 +537,14 @@ class _Run:
         self.grounding_usages.append(usage)
         self.prompt_versions["grounding_check"] = _grounding_prompt_version()
         claims = remap_flags(report.unsupported, index_map)
-        self.record(step, usage, section=section, flags=len(claims))
-        return claims
+        tag_fixes = [
+            f.model_copy(update={"section_index": index_map[f.section_index]})
+            for f in report.tag_fixes
+            if 0 <= f.section_index < len(index_map)
+        ]
+        note = f"tag fixes proposed: {len(tag_fixes)}" if tag_fixes else None
+        self.record(step, usage, section=section, flags=len(claims), note=note)
+        return claims, tag_fixes
 
     def ground_turns(
         self,
@@ -773,9 +802,22 @@ def write_section(
         topic_profile = f"{primary.topic_label} (deep)"
     else:
         topic_profile = _topic_profile_line(profile, primary.topic)
+    # D-68/D-70: radio-style tease and payoff. The cold open teases the hook;
+    # the first story pays it off once, early, and never restates it or names
+    # the show's structure aloud.
     first_section_rule = (
-        "This is the first section. The episode's intro already opened on the cold-open "
-        "hook -- pick up from it, don't restate it."
+        (
+            "This is the first section. The episode opened by teasing this fact: "
+            f'"{outline.cold_open_hook}". Pay it off once: refer back to it in a few words '
+            "and give the full detail, in your first or second turn. After that, don't state "
+            "that fact again anywhere in this section -- the listener has already heard it "
+            'twice. Never name the show\'s structure aloud: no "cold open", "intro", '
+            '"teaser" or "as we said at the top".\n'
+            '  (Made-up example.) Do: "That parking-app number is real: fines brought in more '
+            'than parking did last year, ..."\n'
+            '  Don\'t: "Those fines from the cold open..." / the same number stated again three '
+            "turns later."
+        )
         if k == 0
         else ""
     )
@@ -849,8 +891,6 @@ def _frame(
     run: _Run,
     outline: Outline,
     frame_budget: int,
-    has_focus_section: bool,
-    focus_request: str | None,
 ) -> FrameOutput:
     intro_words, outro_words = frame_word_targets(frame_budget)
     prompt = load_prompt(
@@ -859,24 +899,13 @@ def _frame(
         host_b=run.names["host_b"],
         tone=run.tone,
         outline=outline.model_dump_json(indent=2),
-        focus_line=(
-            f'The listener asked about: "{focus_request}". The first story section answers it.'
-            if has_focus_section
-            else "There is no listener request to answer in this episode."
-        ),
-        focus_rule=(
-            "Say once, briefly, that the listener asked about this and that's where the "
-            "episode starts."
-            if has_focus_section
-            else 'Do not say "you asked about..." -- there is no request to answer this time.'
-        ),
         intro_words=str(intro_words),
         outro_words=str(outro_words),
     )
     frame_out, usage = run.write(prompt, FrameOutput, "frame")
     assert isinstance(frame_out, FrameOutput)
     host_names = list(run.names.values())
-    errors = validate_frame(frame_out, host_names, has_focus_section)
+    errors = validate_frame(frame_out, host_names)
     frame_words = word_count(
         [*frame_out.cold_open_turns, *frame_out.preview_turns, *frame_out.outro_turns]
     )
@@ -891,7 +920,7 @@ def _frame(
         )
         frame_out, usage = run.write(retry, FrameOutput, "frame_retry")
         assert isinstance(frame_out, FrameOutput)
-        errors = validate_frame(frame_out, host_names, has_focus_section)
+        errors = validate_frame(frame_out, host_names)
         run.record("frame_retry", usage)
         if errors:
             raise RuntimeError(f"frame invalid after retry: {'; '.join(errors)}")
@@ -1172,7 +1201,10 @@ def _script(
         name = f"s{final_index}"
         context_ids = drafts[-1].source_ids if drafts else None
         context = {0: context_ids} if context_ids else None
-        flags = run_.ground("ground", [section], [final_index], f"{name}_ground", context)
+        flags, tag_fixes = run_.ground(
+            "ground", [section], [final_index], f"{name}_ground", context
+        )
+        section, applied_tags = grounding.apply_tag_fixes(section, tag_fixes)
         run_.tracer.write_json(
             f"03_{name}_grounding.json",
             {
@@ -1180,6 +1212,7 @@ def _script(
                 "checked_against": section.source_ids,
                 "context_previous_story": context_ids or [],
                 "flags": claims_json(flags),
+                "tag_fixes": [f.model_dump() for f in applied_tags],
             },
         )
         flags_initial[final_index] = flags
@@ -1199,11 +1232,10 @@ def _script(
         drafts.append(section)
 
     # 3. Frame: intro (cold open + preview) and outro. Story sections pass
-    #    through untouched (D-62).
-    has_focus_section = any(
-        source_by_id[sid].topic == _FOCUS_TOPIC for p in outline.sections for sid in p.source_ids
-    )
-    frame_out = _frame(run_, outline, frame_budget, has_focus_section, episode.focus_request)
+    #    through untouched (D-62). The frame is never told about the
+    #    listener's request (D-69): leading with that story is the only
+    #    acknowledgement.
+    frame_out = _frame(run_, outline, frame_budget)
     intro_work = [*frame_out.cold_open_turns, *frame_out.preview_turns]
     outro_work = list(frame_out.outro_turns)
 
@@ -1213,7 +1245,14 @@ def _script(
         Section(kind="intro", turns=intro_work, source_ids=all_ids),
         Section(kind="outro", turns=outro_work, source_ids=all_ids),
     ]
-    frame_flags = run_.ground("ground_frame", checked, [0, n + 1], "frame_ground")
+    frame_flags, frame_tag_fixes = run_.ground("ground_frame", checked, [0, n + 1], "frame_ground")
+    intro_checked, _ = grounding.apply_tag_fixes(
+        checked[0], [f for f in frame_tag_fixes if f.section_index == 0]
+    )
+    outro_checked, _ = grounding.apply_tag_fixes(
+        checked[1], [f for f in frame_tag_fixes if f.section_index == n + 1]
+    )
+    intro_work, outro_work = list(intro_checked.turns), list(outro_checked.turns)
     by_index: dict[int, list[UnsupportedClaim]] = {}
     for c in frame_flags:
         by_index.setdefault(c.section_index, []).append(c)

@@ -888,3 +888,61 @@ Built `scripts/export_sample.py` (run from repo root) to turn a `ready` episode 
 - 254 tests pass; `ruff` and `tsc` are clean.
 
 **[VERIFY] Not yet measured on real providers.** This session's network policy blocked `api.openai.com`, `api.exa.ai` and `api.elevenlabs.io` (403 from the egress proxy), so no real episode was scripted with v3/v4. The planned check: rescript episode 2875 (and 15708–15710) with `SCRIPT_TRACE_DIR` set, then generate a fresh 10-minute episode for `sample@example.com`. Compare questions per story turn, "?/No." pairs, grounding flags initial → final, words vs budget and cost against the v2 exports, and listen to it.
+
+**First real run (rescript of episode 2875, 6 min, same 5 articles; run by the user locally; export in chat, not committed).** Scripting $0.178 / 175 s, grounding $0.009; 755 words vs 810; flags 17 → 1.
+- Worked: **0 questions in story sections** (v2: 7, e.g. "But does fewer tokens guarantee…?"). Takes stated as claims, pushback as statements. The ElevenLabs section (243 words, 0 flags) is the best section so far.
+- New problems:
+  1. **Florida (a130) collapsed to 66 empty words** after 9 flags, and Anthropic (a98) lost its Opus comparison after 5. Suspected cause, not yet confirmed: paywalled Forbes/Reuters bodies are short stubs. The outline sees highlights + body, but the writer and grounder see only `article.content or highlights` (`_build_source`), so facts planned from the highlights get flagged. Needs `SELECT id, length(content), left(content,300), highlights FROM articles WHERE id IN (98,130,174)`.
+  2. A new tic: "Exactly." / "Agreed." opens the closing turn, and the writer says "My take:" aloud.
+  3. Every section ends on doubt ("unproven", "no decision yet"), and so does the outro: `tension` / `open_questions` are applied to every story.
+- The 10-minute depth budget was not exercised (`rescript` keeps the old ranking).
+
+## D-66 — Writer/grounder see highlights; section_writer.v4 and outline.v4 (2026-09-28)
+
+**Source mismatch confirmed, but not as paywall stubs.** Episode 1 (fresh 10-minute generate, sample profile): the Anthropic article had a 17.7k-char body, and the five grounding flags on its section were facts the outline had planned from *highlights* (AWS/Google/Azure availability, the API model ID, the verification programme) that sit at chars ~16k of the body, past `SOURCE_CHARS` (12,000). The outline sees highlights + first 3k chars; the writer and grounder saw only the body, truncated. Fix: `_build_source` now puts the highlights first, then the body, so the truncation cuts the tail of a long body and never Exa's picked passages. Thin (highlights-only) sources are unchanged. The "body under ~1,500 chars counts as thin" idea from the handoff is **not** built: no stubs appeared in this run (bodies 2.9k–17.7k), so there is no evidence for it.
+
+**Prompts (v3 is recorded on an episode, so new files):**
+- `section_writer.v4`: no bare agreement openers ("Exactly.", "Agreed.", "Right."); a host who agrees adds something new; no "My take:" aloud; sections end on a consequence, a concrete date/event, or a sharp line, and on an open question only when it is the heart of the story. `tension` null means no invented doubt.
+- `outline.v4`: `tension` and `open_questions` only when central (guide: at most ~1 story in 3).
+
+**Result, same 4 articles, rescript of episode 1 (v3 → v4):** grounding flags initial 7 → 1 (final 0 both); scripting+grounding $0.16 → $0.15; 1,194 words vs 1,350 budget. Bare-agreement openers 0, "My take" 0, questions 0. `tension` set on 1 of 4 stories (was 4 of 4). Endings varied; the outro still leans on "proven vs promised", noted below.
+
+**Open:** the outro still closes on a doubt theme ("separating what's promised from what's proven"); the depth budget produced 4 stories for 10 minutes and the script is ~12% under budget, within tolerance; audio not yet generated (D-65 said audio only at the end); one sample is not a distribution, so re-run on a second profile before calling v4 done. Cost of the 10-minute scripting is ~$0.16.
+
+## D-67 — Entertainment pass: section_writer.v5, outline.v5, frame.v3 (2026-09-28)
+
+A read of the v4 script for entertainment value found it accurate but flat: all 25 turns 29–60 words, zero audio tags, interchangeable hosts, a hedge in nearly every section even with `tension` null, producer-speak bridges, the most urgent story buried third, and a moral for an outro.
+
+- `section_writer.v5`: host voices ({host_a} builder, {host_b} operator with dry humor); rhythm rules (≥2 short content-carrying turns per section, ≤2 long turns in a row, ≤1 dash interruption); a **caution budget** (≤1 hedge per section, none when `tension`/`open_questions` are empty; attribution isn't a hedge; attribution chains ≤2 deep); one audio tag per section when earned; null `bridge_in` means a clean cut.
+- `outline.v5`: urgent stories early; `bridge_in` only for a real link.
+- `frame.v3`: outro ends on a callback or a concrete upcoming date, never a theme; the preview doesn't reuse the cold open's fact; the same host voices.
+
+**Result, rescript of episode 1 (v4 → v5), same articles:** 25 → 37 turns; short turns (<12 words) 0 → 9; turns of 40+ words 21 → 15; turn-length stdev 8.8 → 15.4; audio tags 0 → 4; flags initial 1 → 1, final 0; 1,194 → 1,126 words (−17% vs budget, inside ±20%); $0.152 → $0.169. Citrix moved from third to second; the outro closes on the September 30 deadline.
+
+**Regressions / open:** the ElevenLabs section lost its only pushback (outline.v5 set `tension` null) and now reads close to a press release; two audio tags don't fit their line ("[chuckles]" on voice cloning, "[surprised] That's a startling gap"); a few short turns are quota fillers rather than responses; the intro still repeats the 55% figure that story 1 uses; the outro covers only Citrix. Candidates for the next version: tag must match the emotion and never be paired with a synonymous adjective; a short turn must answer the previous line; the lead story keeps its tension if the sources support one.
+
+## D-68 — Tags grounded by the grounding check; tension by test; radio-style cold open (2026-09-28)
+
+- **Audio tags are grounded like facts.** A tag is a claim about emotion, so `grounding_check.v5` checks every tag (including on reaction turns it otherwise skips): `reacts_to` first, then `fits` / `swap` (with `proposed_tag`) / `remove`. The grounder only judges existing tags, never adds one. `grounding.apply_tag_fixes` applies a fix as a plain string replace of the tag -- the words never change, so no patch call and no re-check. Tag fixes are kept in `GroundingReport.tag_fixes`, apart from `unsupported`, so the fact-flag counts stay comparable with earlier versions; they are noted on the grounding step and in the trace.
+- **`outline.v6`:** `tension` is set by a test ("does something in the sources directly test this take?"), not a quota. The v4/v5 "about one in three" guide had dropped the ElevenLabs story's only real counterpoint.
+- **`section_writer.v6`:** short turns optional ("only when they answer the line before"); do/don't examples for the rules the model actually broke (short turns, hedging, attribution chains, openers, endings, bridges, tags), all about made-up stories so their wording isn't copied.
+- **`frame.v4`:** the cold open is a radio tease (hook only, about 30 words); the preview teases one specific moment from a later story; the outro ties its callback to the lead when it fits. The first story's rule now quotes the hook and asks for a callback plus payoff.
+
+**Result, rescript of episode 1 (v5 → v6):** fact flags initial 1 → 0; tag fixes 1 (a `[chuckles]` on a shipment schedule removed); the 3 remaining tags all fit their lines; `tension` set on 2 of 4 stories (lead included); $0.169 → $0.152; 1,126 → 1,140 words.
+
+**Regressions / open:** optional short turns became none (9 → 1; turn-length stdev 15.4 → 10.7). The first story says "those ten seconds from the cold open" aloud and then restates the ten-second fact later in the section. The preview narrates personalization ("You wanted to know about...") and hedges. Citrix hedges despite a null `tension`.
+
+## D-69 — The intro never narrates the listener's request; a D-59 leftover removed (2026-09-28)
+
+**Correction of the first version of this entry.** Narrated personalization was already banned in D-62 ("the personalization was being *announced* instead of just shaping the pick and the angle"), and every frame prompt since carries "Never narrate the personalization" in its hard rules. D-62 missed one older instruction: the `focus_rule` string that `script.py` built for the frame since D-59 ("Say once, briefly, that the listener asked about this..."), plus a `focus_line` ("The listener asked about: ..."). So the frame prompt contradicted itself. v4/v5 happened to lean to the ban ("We start with voice AI agents"); v6's preview rewrite made the old instruction win ("You wanted to know about new voice AI agents... That's where we start.").
+
+**Decision.** The frame is no longer told about the request at all: `frame.v5` drops `{focus_line}` and `{focus_rule}`, and `_frame` no longer takes the focus. The outline already puts the requested story first, which is the only acknowledgement, and that holds whether the request was met or not (the user chose silence in both cases). `validate_frame` rejects a short list of request-narrating phrases ("you asked about", "you wanted to know", "your request", ...) as a deterministic backstop, since a prompt-only ban lost to a code-built string once. The `podcast-script` skill's intro row, which still said "You asked about X -- we start there", now states the ban.
+
+## D-70 — Short turns as a soft target; the hook paid off once (2026-09-28)
+
+- `section_writer.v7`: "most sections have one or two short turns", each answering the line before; skip only when nothing earns one (v6's "optional" produced none).
+- The first section's rule (built in `script.py`) now quotes the hook, asks for one payoff in the first or second turn, forbids restating it later in the section, and forbids naming the show's structure aloud ("cold open", "intro", "teaser").
+
+**Result, rescript of episode 1 (v6 → v7):** fact flags initial 0 → 0; the request is not narrated; "cold open" not said; 30 → 36 turns, turns of 40+ words 16 → 7 (fewer monologues), but no turn under 12 words (the short turns land at 12–20 words); 4 audio tags, all judged "fits" by the grounder; 1,140 → 1,154 words; $0.152 → $0.151.
+
+**Open:** "those numbers we opened with" is a softer reference to the show's structure; the hook fact comes back a third time in the outro; the preview hedges ("That isn't a count of vulnerable machines", "No approval has been announced"); Sonnet ends on a migration-setting detail. Hedging with null `tension` and the "distinction" tic are left as they are by the user's choice.
