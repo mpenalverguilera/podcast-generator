@@ -1,0 +1,88 @@
+{
+  "episode_id": 2875,
+  "title": "ElevenLabs\u2019 Faster Voice Model and the Agent Question",
+  "user": "sample@example.com",
+  "focus_request": "voice AI agents -- new launches, funding and real enterprise deployments",
+  "target_minutes": 6,
+  "prompt_versions": {
+    "frame": 2,
+    "outline": 2,
+    "query_planner": 1,
+    "section_patch": 2,
+    "section_writer": 2,
+    "grounding_check": 3
+  },
+  "topics": [
+    "AI agents and frontier model launches",
+    "AI regulation and public policy",
+    "AI chips and semiconductors",
+    "Cybersecurity"
+  ],
+  "duration_s": 326.88,
+  "word_count": 743,
+  "word_budget": 810,
+  "grounding_flags": {
+    "initial": 12,
+    "final": 1
+  },
+  "cost_by_stage": {
+    "assembling": {
+      "cost_usd": 0.0,
+      "latency_ms": 8359,
+      "cost_is_estimate": false,
+      "provider": "local",
+      "model": null
+    },
+    "extracting": {
+      "cost_usd": 0.005,
+      "latency_ms": 782,
+      "cost_is_estimate": false,
+      "provider": "exa",
+      "model": null
+    },
+    "fetching": {
+      "cost_usd": 0.077,
+      "latency_ms": 9407,
+      "cost_is_estimate": false,
+      "provider": "exa",
+      "model": null
+    },
+    "grounding": {
+      "cost_usd": 0.005443,
+      "latency_ms": 53903,
+      "cost_is_estimate": false,
+      "provider": "openai",
+      "model": "gpt-6-luna"
+    },
+    "planning": {
+      "cost_usd": 0.00028,
+      "latency_ms": 6358,
+      "cost_is_estimate": false,
+      "provider": "openai",
+      "model": "gpt-6-luna"
+    },
+    "ranking": {
+      "cost_usd": 0.354476,
+      "latency_ms": 16328,
+      "cost_is_estimate": false,
+      "provider": "openai",
+      "model": "gpt-6-sol"
+    },
+    "scripting": {
+      "cost_usd": 0.191058,
+      "latency_ms": 1081651,
+      "cost_is_estimate": false,
+      "provider": "openai",
+      "model": "gpt-6-sol"
+    },
+    "voicing": {
+      "cost_usd": 0.51744,
+      "latency_ms": 65703,
+      "cost_is_estimate": true,
+      "provider": "elevenlabs",
+      "model": "eleven_v3"
+    }
+  },
+  "total_cost_usd": 1.1507,
+  "note": "elevenlabs cost_usd is an estimate (units_in x ELEVENLABS_USD_PER_1K_CHARS); see cost_is_estimate and docs/DECISIONS.md D-12"
+}
