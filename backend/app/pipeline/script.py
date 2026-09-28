@@ -802,13 +802,22 @@ def write_section(
         topic_profile = f"{primary.topic_label} (deep)"
     else:
         topic_profile = _topic_profile_line(profile, primary.topic)
-    # D-68: radio-style tease and payoff. The cold open teases the hook; the
-    # first story pays it off with a callback instead of restating it as new.
+    # D-68/D-70: radio-style tease and payoff. The cold open teases the hook;
+    # the first story pays it off once, early, and never restates it or names
+    # the show's structure aloud.
     first_section_rule = (
-        "This is the first section. The episode's cold open just teased: "
-        f'"{outline.cold_open_hook}". Pay it off: call back to it in a few words '
-        '("those ten seconds...", "that head start") and then give the full detail -- '
-        "don't announce it as if the listener hadn't heard it."
+        (
+            "This is the first section. The episode opened by teasing this fact: "
+            f'"{outline.cold_open_hook}". Pay it off once: refer back to it in a few words '
+            "and give the full detail, in your first or second turn. After that, don't state "
+            "that fact again anywhere in this section -- the listener has already heard it "
+            'twice. Never name the show\'s structure aloud: no "cold open", "intro", '
+            '"teaser" or "as we said at the top".\n'
+            '  (Made-up example.) Do: "That parking-app number is real: fines brought in more '
+            'than parking did last year, ..."\n'
+            '  Don\'t: "Those fines from the cold open..." / the same number stated again three '
+            "turns later."
+        )
         if k == 0
         else ""
     )
@@ -882,8 +891,6 @@ def _frame(
     run: _Run,
     outline: Outline,
     frame_budget: int,
-    has_focus_section: bool,
-    focus_request: str | None,
 ) -> FrameOutput:
     intro_words, outro_words = frame_word_targets(frame_budget)
     prompt = load_prompt(
@@ -892,18 +899,6 @@ def _frame(
         host_b=run.names["host_b"],
         tone=run.tone,
         outline=outline.model_dump_json(indent=2),
-        focus_line=(
-            f'The listener asked about: "{focus_request}". The first story section answers it.'
-            if has_focus_section
-            else "There is no listener request to answer in this episode."
-        ),
-        focus_rule=(
-            "The first story answers the listener's request: start the preview with it, like any "
-            'other story -- never say it was requested (no "you asked about", "you wanted to '
-            'know", "your request").'
-            if has_focus_section
-            else 'Do not say "you asked about..." -- there is no request to answer this time.'
-        ),
         intro_words=str(intro_words),
         outro_words=str(outro_words),
     )
@@ -1237,11 +1232,10 @@ def _script(
         drafts.append(section)
 
     # 3. Frame: intro (cold open + preview) and outro. Story sections pass
-    #    through untouched (D-62).
-    has_focus_section = any(
-        source_by_id[sid].topic == _FOCUS_TOPIC for p in outline.sections for sid in p.source_ids
-    )
-    frame_out = _frame(run_, outline, frame_budget, has_focus_section, episode.focus_request)
+    #    through untouched (D-62). The frame is never told about the
+    #    listener's request (D-69): leading with that story is the only
+    #    acknowledgement.
+    frame_out = _frame(run_, outline, frame_budget)
     intro_work = [*frame_out.cold_open_turns, *frame_out.preview_turns]
     outro_work = list(frame_out.outro_turns)
 

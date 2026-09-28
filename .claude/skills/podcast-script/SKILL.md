@@ -15,7 +15,7 @@ story section, `frame` writes the intro and outro. Outputs must satisfy the Pyda
 | Section | Length | Content |
 |---|---|---|
 | Cold open (first turns of the `intro` section) | 1–2 turns | A hook from the strongest story. |
-| Intro (rest of the `intro` section) | 2–3 turns | Hosts greet the listener by name if known, say this is an AI-generated briefing, preview the stories. If there is a focus request: "You asked about X — we start there." |
+| Intro (rest of the `intro` section) | 1–2 turns | A preview that teases one specific moment from a later story. No greeting, no host self-introductions, no AI-briefing line (D-63). Never narrate the personalization: a focus request is acknowledged only by leading with that story, never by saying "you asked about X" (D-62, D-69). |
 | Stories | 6–12 turns each | Built from the outline's brief: `angle` is the section's *take* (one declarative, arguable claim), plus `stakes`, an optional `tension` (the honest counterpoint) and `open_questions` (what the sources leave unresolved). Both hosts report facts and both interpret; one challenges with the tension, the other answers, concedes or qualifies. End on the take's consequence or the sharpest open question. |
 | Transitions | inside the next story's first turn | One sentence linking stories; no "moving on" clichés. |
 | Outro | 2–3 turns | One-line recap, a "watch this next" item if the sources support it, sign-off. |

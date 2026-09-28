@@ -169,6 +169,7 @@ def test_sections_are_written_sequentially_with_earlier_sections_visible(db) -> 
 
     first, second = llm.prompts("SectionDraft")
     assert "this is the first section" in first
+    assert "don't state that fact again" in first  # D-70: pay the hook off once
     assert "Section 1:\nAlex: This is a fake sentence" in second
 
 
@@ -359,17 +360,10 @@ def test_focus_is_rendered_as_the_listener_request_never_the_word_focus(db) -> N
     assert 'Listener\'s request for this episode: "open-weight models"' in outline_prompt
     assert "— focus —" not in outline_prompt
     assert "whose topic is the listener's request" in outline_prompt
-    assert "never say it was requested" in llm.prompts("FrameOutput")[0]
-
-
-def test_no_focus_section_means_no_you_asked_about(db) -> None:
-    # A focus request, but no focus article was selected.
-    episode, _ = _episode(db, 2, focus="open-weight models")
-    llm = _StubLLM()
-    script.run(episode, _adapters(llm), db)
-
-    assert 'Do not say "you asked about..."' in llm.prompts("FrameOutput")[0]
-    assert "whose topic is the listener's request" not in llm.prompts("Outline")[0]
+    # D-69: the frame is never told about the request, so it can't narrate it.
+    frame_prompt = llm.prompts("FrameOutput")[0]
+    assert "open-weight models" not in frame_prompt
+    assert "listener asked" not in frame_prompt.lower()
 
 
 def test_episode_items_follow_the_outline_order(db) -> None:

@@ -923,8 +923,17 @@ A read of the v4 script for entertainment value found it accurate but flat: all 
 
 **Regressions / open:** optional short turns became none (9 → 1; turn-length stdev 15.4 → 10.7). The first story says "those ten seconds from the cold open" aloud and then restates the ten-second fact later in the section. The preview narrates personalization ("You wanted to know about...") and hedges. Citrix hedges despite a null `tension`.
 
-## D-69 — The intro never narrates the listener's request (2026-09-28)
+## D-69 — The intro never narrates the listener's request; a D-59 leftover removed (2026-09-28)
 
-The v6 preview said "You wanted to know about new voice AI agents..." because the D-60-era frame rule told it to say "you asked about X" once when a focus story exists. The user doesn't want the personalization said aloud: leading with the requested story is the acknowledgement. `focus_rule` now tells the frame to start the preview with that story without saying it was requested, and `validate_frame` rejects a short list of request-narrating phrases ("you asked about", "you wanted to know", "your request", ...) in any intro, focus or not.
+**Correction of the first version of this entry.** Narrated personalization was already banned in D-62 ("the personalization was being *announced* instead of just shaping the pick and the angle"), and every frame prompt since carries "Never narrate the personalization" in its hard rules. D-62 missed one older instruction: the `focus_rule` string that `script.py` built for the frame since D-59 ("Say once, briefly, that the listener asked about this..."), plus a `focus_line` ("The listener asked about: ..."). So the frame prompt contradicted itself. v4/v5 happened to lean to the ban ("We start with voice AI agents"); v6's preview rewrite made the old instruction win ("You wanted to know about new voice AI agents... That's where we start.").
 
-**Open, under discussion:** when a focus was requested but no article matched, the episode currently ignores the request silently; one honest line ("not much new on X this week") may be the one case worth saying. Also open: the phrase list only catches known wordings.
+**Decision.** The frame is no longer told about the request at all: `frame.v5` drops `{focus_line}` and `{focus_rule}`, and `_frame` no longer takes the focus. The outline already puts the requested story first, which is the only acknowledgement, and that holds whether the request was met or not (the user chose silence in both cases). `validate_frame` rejects a short list of request-narrating phrases ("you asked about", "you wanted to know", "your request", ...) as a deterministic backstop, since a prompt-only ban lost to a code-built string once. The `podcast-script` skill's intro row, which still said "You asked about X -- we start there", now states the ban.
+
+## D-70 — Short turns as a soft target; the hook paid off once (2026-09-28)
+
+- `section_writer.v7`: "most sections have one or two short turns", each answering the line before; skip only when nothing earns one (v6's "optional" produced none).
+- The first section's rule (built in `script.py`) now quotes the hook, asks for one payoff in the first or second turn, forbids restating it later in the section, and forbids naming the show's structure aloud ("cold open", "intro", "teaser").
+
+**Result, rescript of episode 1 (v6 → v7):** fact flags initial 0 → 0; the request is not narrated; "cold open" not said; 30 → 36 turns, turns of 40+ words 16 → 7 (fewer monologues), but no turn under 12 words (the short turns land at 12–20 words); 4 audio tags, all judged "fits" by the grounder; 1,140 → 1,154 words; $0.152 → $0.151.
+
+**Open:** "those numbers we opened with" is a softer reference to the show's structure; the hook fact comes back a third time in the outro; the preview hedges ("That isn't a count of vulnerable machines", "No approval has been announced"); Sonnet ends on a migration-setting detail. Hedging with null `tension` and the "distinction" tic are left as they are by the user's choice.
