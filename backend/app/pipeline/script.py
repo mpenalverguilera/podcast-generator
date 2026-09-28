@@ -49,6 +49,7 @@ from app.schemas import (
     ScriptStep,
     Section,
     SectionDraft,
+    TagFix,
     Turn,
     UnsupportedClaim,
     Usage,
@@ -510,7 +511,10 @@ class _Run:
         index_map: list[int],
         label: str,
         context_by_local_index: dict[int, list[str]] | None = None,
-    ) -> list[UnsupportedClaim]:
+    ) -> tuple[list[UnsupportedClaim], list[TagFix]]:
+        """Fact flags and audio-tag fixes (D-68), both remapped to final
+        section indices. Tag fixes are counted in the step's note, never in
+        `flags`, so the fact-flag numbers stay comparable across versions."""
         checked = Script(title="", summary="", sections=sections)
         section = index_map[0] if len(index_map) == 1 else None
         llm = self.tracer.wrap(self.llm, label, section)
@@ -521,8 +525,14 @@ class _Run:
         self.grounding_usages.append(usage)
         self.prompt_versions["grounding_check"] = _grounding_prompt_version()
         claims = remap_flags(report.unsupported, index_map)
-        self.record(step, usage, section=section, flags=len(claims))
-        return claims
+        tag_fixes = [
+            f.model_copy(update={"section_index": index_map[f.section_index]})
+            for f in report.tag_fixes
+            if 0 <= f.section_index < len(index_map)
+        ]
+        note = f"tag fixes proposed: {len(tag_fixes)}" if tag_fixes else None
+        self.record(step, usage, section=section, flags=len(claims), note=note)
+        return claims, tag_fixes
 
     def ground_turns(
         self,
@@ -780,9 +790,13 @@ def write_section(
         topic_profile = f"{primary.topic_label} (deep)"
     else:
         topic_profile = _topic_profile_line(profile, primary.topic)
+    # D-68: radio-style tease and payoff. The cold open teases the hook; the
+    # first story pays it off with a callback instead of restating it as new.
     first_section_rule = (
-        "This is the first section. The episode's intro already opened on the cold-open "
-        "hook -- pick up from it, don't restate it."
+        "This is the first section. The episode's cold open just teased: "
+        f'"{outline.cold_open_hook}". Pay it off: call back to it in a few words '
+        '("those ten seconds...", "that head start") and then give the full detail -- '
+        "don't announce it as if the listener hadn't heard it."
         if k == 0
         else ""
     )
@@ -1179,7 +1193,10 @@ def _script(
         name = f"s{final_index}"
         context_ids = drafts[-1].source_ids if drafts else None
         context = {0: context_ids} if context_ids else None
-        flags = run_.ground("ground", [section], [final_index], f"{name}_ground", context)
+        flags, tag_fixes = run_.ground(
+            "ground", [section], [final_index], f"{name}_ground", context
+        )
+        section, applied_tags = grounding.apply_tag_fixes(section, tag_fixes)
         run_.tracer.write_json(
             f"03_{name}_grounding.json",
             {
@@ -1187,6 +1204,7 @@ def _script(
                 "checked_against": section.source_ids,
                 "context_previous_story": context_ids or [],
                 "flags": claims_json(flags),
+                "tag_fixes": [f.model_dump() for f in applied_tags],
             },
         )
         flags_initial[final_index] = flags
@@ -1220,7 +1238,14 @@ def _script(
         Section(kind="intro", turns=intro_work, source_ids=all_ids),
         Section(kind="outro", turns=outro_work, source_ids=all_ids),
     ]
-    frame_flags = run_.ground("ground_frame", checked, [0, n + 1], "frame_ground")
+    frame_flags, frame_tag_fixes = run_.ground("ground_frame", checked, [0, n + 1], "frame_ground")
+    intro_checked, _ = grounding.apply_tag_fixes(
+        checked[0], [f for f in frame_tag_fixes if f.section_index == 0]
+    )
+    outro_checked, _ = grounding.apply_tag_fixes(
+        checked[1], [f for f in frame_tag_fixes if f.section_index == n + 1]
+    )
+    intro_work, outro_work = list(intro_checked.turns), list(outro_checked.turns)
     by_index: dict[int, list[UnsupportedClaim]] = {}
     for c in frame_flags:
         by_index.setdefault(c.section_index, []).append(c)

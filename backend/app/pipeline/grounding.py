@@ -9,7 +9,15 @@ the extra `pipeline_steps` row (docs/DECISIONS.md D-30)."""
 from app.adapters.llm.protocol import LLM
 from app.config import Settings, get_settings
 from app.prompts import load_prompt
-from app.schemas import GroundingChecks, GroundingReport, Script, UnsupportedClaim, Usage
+from app.schemas import (
+    GroundingChecks,
+    GroundingReport,
+    Script,
+    Section,
+    TagFix,
+    UnsupportedClaim,
+    Usage,
+)
 
 # One limit for what the section writer sees and what the grounder checks
 # against, so a true fact from an article's tail isn't flagged just because
@@ -93,8 +101,38 @@ def to_report(result: GroundingChecks) -> GroundingReport:
             )
             for c in result.checks
             if c.verdict == "unsupported"
-        ][:30]
+        ][:30],
+        tag_fixes=[
+            TagFix(
+                section_index=t.section_index,
+                turn_index=t.turn_index,
+                old_tag=t.tag,
+                new_tag=(t.proposed_tag or "") if t.verdict == "swap" else "",
+                reason=t.reacts_to,
+            )
+            for t in result.tags
+            if t.verdict != "fits"
+        ],
     )
+
+
+def apply_tag_fixes(section: Section, fixes: list[TagFix]) -> tuple[Section, list[TagFix]]:
+    """Swaps or removes audio tags by plain string replace (D-68): only the
+    tag changes, never a word. A fix whose tag isn't actually in its turn
+    (the checker misread it) is skipped. Returns the new section and the
+    fixes that were applied."""
+    turns = list(section.turns)
+    applied: list[TagFix] = []
+    for f in fixes:
+        if not (0 <= f.turn_index < len(turns)) or not f.old_tag.startswith("["):
+            continue
+        text = turns[f.turn_index].text
+        if f.old_tag not in text or f.old_tag == f.new_tag:
+            continue
+        new_text = " ".join(text.replace(f.old_tag, f.new_tag, 1).split())
+        turns[f.turn_index] = turns[f.turn_index].model_copy(update={"text": new_text})
+        applied.append(f)
+    return section.model_copy(update={"turns": turns}), applied
 
 
 def format_issues(claims: list[UnsupportedClaim]) -> str:

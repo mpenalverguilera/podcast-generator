@@ -164,8 +164,25 @@ class UnsupportedClaim(BaseModel):
     suggested_fix: str
 
 
+AudioTag = Literal["[laughs]", "[chuckles]", "[curious]", "[surprised]", "[sighs]"]
+
+
+class TagFix(BaseModel):
+    """An audio tag the grounding check judged wrong for its line (D-68).
+    Applied in code as a plain replace of `old_tag` by `new_tag` ("" removes
+    it): the spoken words never change, so no patch or re-check is needed.
+    Kept apart from `unsupported` so the fact-flag counts stay comparable."""
+
+    section_index: int
+    turn_index: int
+    old_tag: str
+    new_tag: str
+    reason: str
+
+
 class GroundingReport(BaseModel):
     unsupported: list[UnsupportedClaim] = Field(default_factory=list, max_length=30)
+    tag_fixes: list[TagFix] = Field(default_factory=list)
 
 
 class ClaimCheck(BaseModel):
@@ -183,6 +200,21 @@ class ClaimCheck(BaseModel):
     suggested_fix: str
 
 
+class TagCheck(BaseModel):
+    """One audio tag the grounding check looked at (grounding_check.v5,
+    D-68). Reason-first like ClaimCheck: `reacts_to` is what in this turn or
+    the previous one the tag's emotion answers to, written before the
+    verdict. A tag is a claim about emotion, so it is grounded in the
+    dialogue the way a fact is grounded in the sources."""
+
+    section_index: int
+    turn_index: int
+    tag: str
+    reacts_to: str
+    verdict: Literal["fits", "swap", "remove"]
+    proposed_tag: AudioTag | None
+
+
 class GroundingChecks(BaseModel):
     """What the grounding model returns (D-65). grounding.check() keeps only
     the "unsupported" rows and hands back a GroundingReport, so everything
@@ -192,6 +224,7 @@ class GroundingChecks(BaseModel):
     # a validation error here would fail the whole stage. to_report() caps the
     # flags it keeps at GroundingReport's 30.
     checks: list[ClaimCheck] = Field(default_factory=list)
+    tags: list[TagCheck] = Field(default_factory=list)
 
 
 class Usage(BaseModel):
