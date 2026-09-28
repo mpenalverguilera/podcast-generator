@@ -899,3 +899,15 @@ Built `scripts/export_sample.py` (run from repo root) to turn a `ready` episode 
 **Result, same 4 articles, rescript of episode 1 (v3 → v4):** grounding flags initial 7 → 1 (final 0 both); scripting+grounding $0.16 → $0.15; 1,194 words vs 1,350 budget. Bare-agreement openers 0, "My take" 0, questions 0. `tension` set on 1 of 4 stories (was 4 of 4). Endings varied; the outro still leans on "proven vs promised", noted below.
 
 **Open:** the outro still closes on a doubt theme ("separating what's promised from what's proven"); the depth budget produced 4 stories for 10 minutes and the script is ~12% under budget, within tolerance; audio not yet generated (D-65 said audio only at the end); one sample is not a distribution, so re-run on a second profile before calling v4 done. Cost of the 10-minute scripting is ~$0.16.
+
+## D-67 — Entertainment pass: section_writer.v5, outline.v5, frame.v3 (2026-09-28)
+
+A read of the v4 script for entertainment value found it accurate but flat: all 25 turns 29–60 words, zero audio tags, interchangeable hosts, a hedge in nearly every section even with `tension` null, producer-speak bridges, the most urgent story buried third, and a moral for an outro.
+
+- `section_writer.v5`: host voices ({host_a} builder, {host_b} operator with dry humor); rhythm rules (≥2 short content-carrying turns per section, ≤2 long turns in a row, ≤1 dash interruption); a **caution budget** (≤1 hedge per section, none when `tension`/`open_questions` are empty; attribution isn't a hedge; attribution chains ≤2 deep); one audio tag per section when earned; null `bridge_in` means a clean cut.
+- `outline.v5`: urgent stories early; `bridge_in` only for a real link.
+- `frame.v3`: outro ends on a callback or a concrete upcoming date, never a theme; the preview doesn't reuse the cold open's fact; the same host voices.
+
+**Result, rescript of episode 1 (v4 → v5), same articles:** 25 → 37 turns; short turns (<12 words) 0 → 9; turns of 40+ words 21 → 15; turn-length stdev 8.8 → 15.4; audio tags 0 → 4; flags initial 1 → 1, final 0; 1,194 → 1,126 words (−17% vs budget, inside ±20%); $0.152 → $0.169. Citrix moved from third to second; the outro closes on the September 30 deadline.
+
+**Regressions / open:** the ElevenLabs section lost its only pushback (outline.v5 set `tension` null) and now reads close to a press release; two audio tags don't fit their line ("[chuckles]" on voice cloning, "[surprised] That's a startling gap"); a few short turns are quota fillers rather than responses; the intro still repeats the 55% figure that story 1 uses; the outro covers only Citrix. Candidates for the next version: tag must match the emotion and never be paired with a synonymous adjective; a short turn must answer the previous line; the lead story keeps its tension if the sources support one.
