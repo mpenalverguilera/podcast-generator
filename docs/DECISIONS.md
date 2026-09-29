@@ -92,6 +92,7 @@ Status is about the decision as it stands today. Entries are never rewritten aft
 | D-71 | Trailing silence on the episode | 2026-09-29 | Active |
 | D-72 | Documentation refresh, DECISIONS repaired | 2026-09-29 | Active |
 | D-73 | Docker packaging, no-keys demo, runner and dashboard fixes | 2026-09-29 | Active |
+| D-74 | ARCHITECTURE review: retry, single-instance, auth and live-preferences limits | 2026-09-29 | Active |
 
 ---
 
@@ -1114,3 +1115,14 @@ Two sandbox-only differences, so the claim is exact: the build sandbox's egress 
 **Alternatives.** A `Makefile` or `scripts/demo.sh` (the phase doc's suggestion) — rejected: two compose commands are as short, and `make` isn't on a default Windows machine, which is the author's. Migrations and seeds as a separate one-shot compose service — rejected for a single-user demo; noted in `solution.md` N-01 as the step before a shared deployment. Serving the API behind nginx on the same origin — rejected: it would change CORS and the media-token URLs (D-40) for no demo benefit. Committing the Playwright script — not done: it needs Node and Playwright beyond the project's dependencies, and would belong in the CI job (N-02) rather than the repo root.
 
 **Consequences.** `VITE_API_URL` is baked in at build time; serving the API anywhere but `localhost:8000` needs a web rebuild with that build argument. Every API start replaces the synthetic dashboard data (deterministic per day). Voice previews still have no files (W-08). A fake episode is silent with a canned script: it proves the mechanics, not the quality.
+
+## D-74 — ARCHITECTURE review: retry semantics, single-instance risks, auth limits, live preferences (2026-09-29)
+**Context.** A review of `docs/ARCHITECTURE.md` against the code, done while preparing `solution.md`, found places where the doc was misleading or silent.
+**Decision.** Documentation only; no code changed.
+- §5.1: the status diagram drew three example retry arrows (to planning, scripting, voicing), which read as "a failure before scripting restarts at planning". Replaced with one transition: a retry re-enters exactly `failed_stage` (`runner._start_index`). Added the staleness trade-off of late retries.
+- §4: the backend row said only "Matches Prosper's stack". Split it into rows with the reasons for SQLAlchemy/Alembic, Pydantic (runtime validation, including LLM structured outputs), `uv` and Postgres (the partial unique index, JSONB and its trade-off).
+- §8: "two instances run every job twice" was both overstated (a simultaneous double fire is stopped by the partial unique index) and incomplete (a second instance's startup recovery marks the first instance's live runs as interrupted and resumes them). Rewritten with the fix path.
+- §9.3: added `localStorage` XSS exposure, no invalidation on password change, the shared HS256 secret, and media-token expiry during a long pause.
+- §16: added that preferences are read live per stage, not snapshotted (only the voice case, D-58, was listed), and that the transcript labels speakers with the current host names.
+**Alternatives.** Fixing the live-preferences gap in code now (a `settings_snapshot` JSONB column) — deferred: documented as a limitation with its fix, to be decided separately.
+**Consequences.** `solution.md` should carry the same limitations when it is written up.

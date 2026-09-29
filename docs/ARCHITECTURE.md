@@ -148,8 +148,11 @@ Rules that keep this safe: worker threads touch only adapters and the file syste
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Backend | FastAPI, Python 3.12, SQLAlchemy 2 + Alembic, Pydantic v2, pydantic-settings, `uv` | Matches Prosper's stack |
-| DB | PostgreSQL 16 | JSONB for profile, queries, script, flags; native enums; a partial unique index |
+| Backend | FastAPI, Python 3.12 | Prosper's stack (D-01). Official SDKs for every provider. Request validation and OpenAPI docs come from the same Pydantic models |
+| ORM and migrations | SQLAlchemy 2 + Alembic | Typed models (`Mapped[...]`); one session per request (`get_db`) or per pipeline run (`session_scope()`), which is what makes commit-per-stage possible. Alembic keeps every schema change as a reviewable, ordered migration; the API container runs `alembic upgrade head` on start |
+| Validation | Pydantic v2, pydantic-settings | **Runtime** validation at every boundary: request bodies (422 before the handler), `.env` config, JSONB round-trips, and **LLM structured outputs** (`responses.parse(text_format=...)`). Static type checking is a separate concern (type hints, ruff) |
+| Packaging | `uv` | One tool for the Python version, the venv and dependencies. `uv.lock` makes installs reproducible; the Docker image uses `uv sync --frozen` |
+| DB | PostgreSQL 16 | The partial unique index is the concurrency guard for "one episode in progress per user"; native enums; JSONB for documents that are read and written whole and shaped by a Pydantic model (profile, planned queries, script, flags). Trade-off: nothing inside a JSONB column is enforced by the database |
 | Scheduler | APScheduler 3.x, in-process | No extra infra; fine for one instance |
 | Providers | `exa-py`, `openai`, `elevenlabs` SDKs; `httpx` for Jev | Official SDKs behind adapters |
 | Audio | `pydub` to join chunks, `ffmpeg` for `loudnorm` (−16 LUFS) and MP3 | Standard, scriptable |
@@ -183,13 +186,14 @@ stateDiagram-v2
   voicing --> failed
   assembling --> failed
 
-  failed --> planning: retry resumes at failed_stage
-  failed --> scripting: retry resumes at failed_stage
-  failed --> voicing: retry resumes at failed_stage
+  state "re-enter failed_stage, then continue" as resume
+  failed --> resume: POST /retry, or auto-resume after a restart
   ready --> [*]
 
   note right of failed
     failed_stage and error are stored.
+    A retry re-enters the one stage that failed
+    (any of the seven), never an earlier one.
     Also set by: daily spend cap reached,
     process restart (error = interrupted),
     CLI --stop-after (never auto-resumed).
@@ -197,6 +201,8 @@ stateDiagram-v2
 ```
 
 Every successful stage writes its output, writes a `pipeline_steps` row, sets the next status and **commits** (D-37). A crash keeps everything already paid for.
+
+**Retry resumes at exactly `failed_stage`** (`runner._start_index`). A failure in fetching reuses the saved `planned_queries`; a failure in voicing reuses the script and every chunk already on disk. No earlier stage is re-run, so no completed work is paid for twice. Trade-off: a retry long after the failure reuses the old news window and the old ranking, so the episode can be stale. A "regenerate" (a new episode) is the right action past some age; the UI does not offer one yet.
 
 ### 5.2 One run, end to end
 
@@ -570,7 +576,11 @@ flowchart TD
   CF -->|"no"| GO["run_episode"]
 ```
 
-- Limitation: two API instances would run every job twice. Fix: a DB advisory lock, or a queue with a worker. Exa Monitors could run scheduled searches server-side but need a public webhook (rejected for a local-first build).
+- **Limitation: single instance only.** The schedule lives in each process's memory (APScheduler's default in-memory job store), so every API instance registers every user's job and nothing coordinates them:
+  - If two instances fire at the same moment, the partial unique index lets only one `create_episode` through; the other gets `EpisodeConflict` and skips.
+  - If they fire at different moments (a misfire inside the one-hour grace, a catch-up run at boot), the first episode may already be `ready`, the index no longer blocks, and the user gets **two episodes and double spend**.
+  - **Worse: startup recovery.** When a second instance boots, `recover_interrupted_episodes` treats every in-progress episode as an orphan, including the ones the first instance is running right now. It marks them failed and auto-resumes them, so two threads run the same episode.
+  - Fix: one scheduler (a leader holding a Postgres advisory lock) that only enqueues, workers that claim jobs from a queue (`SELECT ... FOR UPDATE SKIP LOCKED` on a jobs table, or Redis with RQ/Celery), and liveness-based recovery (a heartbeat or lease column) instead of "everything in progress is dead". Exa Monitors could run scheduled searches server-side but need a public webhook (rejected for a local-first build).
 
 ## 9. API
 
@@ -645,7 +655,12 @@ sequenceDiagram
   A-->>B: 206 Partial Content (FileResponse)
 ```
 
-No refresh token and no revocation list: logging out just forgets the token, and a stolen one lives until it expires (D-33, accepted for this scope).
+No refresh token and no revocation list: logging out just forgets the token, and a stolen one lives until it expires (D-33, accepted for this scope). Also accepted:
+- The JWT is kept in `localStorage`, so any XSS on the page can read it. An httpOnly cookie cannot be read by JavaScript.
+- Changing the password does not invalidate existing tokens.
+- One HS256 secret signs every token: whoever holds `JWT_SECRET` can mint a valid token for any `sub`, including an admin.
+- The media token is pinned when the player mounts and expires after 1 h. After a pause longer than that, seeking into a part the browser has not buffered sends a new `Range` request with an expired token and gets a 401 until the page is reloaded. Fix: on the audio `error` event, refetch the episode for a fresh `audio_url` and restore `currentTime`.
+- Production path: a managed identity provider (no stored passwords, MFA, resets) **plus** short-lived access tokens with server-side, revocable refresh tokens (or server sessions in an httpOnly cookie). The identity provider alone does not give revocation.
 
 ## 10. Frontend
 
@@ -786,4 +801,4 @@ Phase 00 confirmed the call shapes (D-09), and later phases added more:
 
 ## 16. Known limitations
 
-Single instance only (double-run risk) · no auth hardening (no refresh, no revocation, no rate limiting, open sign-up spends real money up to the daily cap) · no same-event collapsing before selection · the classifier prompt version is not stored on the episode · resuming voicing can mix two voices if the user changes a voice between attempts (D-58) · restart recovery can resume an episode a live CLI is working on (D-59) · article text is never refreshed (D-24) · Jev never returns `is_stale` (D-61) · the seeded episodes and metrics are synthetic · no hosted deployment · voice preview files are never generated. Each is discussed, with a fix, in `solution.md`.
+Single instance only (double-run risk) · no auth hardening (no refresh, no revocation, no rate limiting, open sign-up spends real money up to the daily cap) · no same-event collapsing before selection · the classifier prompt version is not stored on the episode · **preferences are read live by each stage, not snapshotted on the episode**: planning and ranking read the profile, scripting reads the profile, tone and host names, voicing reads the voice ids. A settings change mid-run or before a retry gives an episode whose stories were picked by the old interests and written with the new tone and names; a removed or renamed topic silently falls back to `"topic (headlines)"` with no description. Voicing retried after a voice change mixes two voices for one host (D-58). Fix: a `settings_snapshot` JSONB column written by `create_episode` and read by every stage, plus a separate "regenerate with current settings" action · the transcript API labels speakers with the user's **current** host names, so renaming a host after an episode is ready makes the transcript disagree with the audio (the snapshot fixes this too) · startup recovery on a second instance hijacks the first instance's live runs (§8) · the media token can expire during a long pause (§9.3) · restart recovery can resume an episode a live CLI is working on (D-59) · article text is never refreshed (D-24) · Jev never returns `is_stale` (D-61) · the seeded episodes and metrics are synthetic · no hosted deployment · voice preview files are never generated. Each is discussed, with a fix, in `solution.md`.
