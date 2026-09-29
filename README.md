@@ -96,6 +96,15 @@ uv run python -m app.cli show <episode_id>                  # status, cost and p
 
 Run `--help` on any subcommand for its options.
 
+## Screenshots
+
+| | |
+|---|---|
+| **Sign in** — with a link to sign up<br>![Login](docs/screenshots/login.png) | **Sign up** — email, password, repeat password<br>![Sign up](docs/screenshots/signup.png) |
+| **Interests** — four guided questions<br>![Guided interview](docs/screenshots/profile-generation.png) | **Your profile** — editable topics, include/exclude tags, depth<br>![Profile](docs/screenshots/profile-detail.png) |
+| **Podcast settings** — length, tone, hosts and voices, schedule<br>![Podcast settings](docs/screenshots/prodcast-settings.png) | **Episodes** — next run countdown, focus request, New / In progress / Played<br>![Episodes](docs/screenshots/episode.png) |
+| **Episode** — player, speed, rating, transcript with sources<br>![Episode detail](docs/screenshots/episode-detail.png) | |
+
 ## More
 
 Full command list, provider/cost rules, and coding conventions live in `CLAUDE.md`.
