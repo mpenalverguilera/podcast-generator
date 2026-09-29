@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers (backend/docker/entrypoint.sh).
+# Git for Windows checks files out with CRLF by default, and a CRLF shebang
+# makes the container fail with "no such file or directory". Force LF.
+*.sh text eol=lf
