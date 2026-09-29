@@ -5,7 +5,7 @@ A user sets their interests; on a schedule (or on demand) the backend finds news
 ElevenLabs, and publishes an MP3. An admin dashboard shows usage and pipeline metrics.
 
 Backend: FastAPI, Python 3.12, PostgreSQL. Frontend: Vite + React + TypeScript.
-See `docs/ARCHITECTURE.md` for the full design and `docs/DECISIONS.md` for the decision log.
+See `solution.md` for the decisions, trade-offs and next steps, `docs/ARCHITECTURE.md` for the full design (with diagrams) and `docs/DECISIONS.md` for the decision log.
 
 ## Requirements
 
