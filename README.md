@@ -79,6 +79,25 @@ for yours, then make sure the daemon is running (`sudo systemctl start docker`).
 
 Re-running `python scripts/setup.py` any time is safe — every step is idempotent.
 
+## Run everything with Docker
+
+The whole app (Postgres, API with scheduler and pipeline, web app) in one command. Only Docker is needed.
+
+```bash
+docker compose up --build            # real providers: needs keys in .env
+```
+
+No API keys? Run it on the fake adapters. Every page works, episodes are generated (canned articles and
+script, silent audio), and the dashboard fills in:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build
+```
+
+Open `http://localhost:5173` and sign in as `demo@example.com` / `demo`, or `admin@example.com` / `admin` for
+the dashboard. The API container migrates and seeds itself on start. `docker compose down -v` wipes the
+database and the audio.
+
 ## Pipeline CLI
 
 The backend also ships a CLI for driving the pipeline directly, without the API. From `backend/`:
@@ -103,7 +122,9 @@ Run `--help` on any subcommand for its options.
 | **Sign in** — with a link to sign up<br>![Login](docs/screenshots/login.png) | **Sign up** — email, password, repeat password<br>![Sign up](docs/screenshots/signup.png) |
 | **Interests** — four guided questions<br>![Guided interview](docs/screenshots/profile-generation.png) | **Your profile** — editable topics, include/exclude tags, depth<br>![Profile](docs/screenshots/profile-detail.png) |
 | **Podcast settings** — length, tone, hosts and voices, schedule<br>![Podcast settings](docs/screenshots/prodcast-settings.png) | **Episodes** — next run countdown, focus request, New / In progress / Played<br>![Episodes](docs/screenshots/episode.png) |
-| **Episode** — player, speed, rating, transcript with sources<br>![Episode detail](docs/screenshots/episode-detail.png) | |
+| **Episode** — player, speed, rating, transcript with sources<br>![Episode detail](docs/screenshots/episode-detail.png) | **Admin dashboard** — date range, synthetic-data toggle, KPIs<br>![Admin overview](docs/screenshots/admin-overview.png) |
+| **Dashboard: product** — activity, episodes, topics, retention, ratings<br>![Admin product](docs/screenshots/admin-product.png) | **Dashboard: operations** — time and failure rate per stage, cost per provider<br>![Admin operations](docs/screenshots/admin-operations.png) |
+| **Dashboard: quality** — classifier eval, rating by prompt version, grounding flags<br>![Admin quality](docs/screenshots/admin-quality.png) | **Operations, real rows only** — one episode generated on fake providers<br>![Admin operations, real only](docs/screenshots/admin-operations-real-only.png) |
 
 ## More
 

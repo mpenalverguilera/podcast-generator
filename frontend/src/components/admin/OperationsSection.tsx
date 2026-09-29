@@ -57,7 +57,13 @@ function StageFailureChart({ operations, synthetic }: { operations: OperationsMe
           <BarChart data={operations.stage_failure_rate} margin={{ left: -10 }}>
             <CartesianGrid vertical={false} stroke={CHART_GRID} />
             <XAxis dataKey="stage" tickFormatter={stageLabel} interval={0} {...AXIS_PROPS} />
-            <YAxis tickFormatter={(v: number) => `${Math.round(v * 100)}%`} {...AXIS_PROPS} />
+            {/* With no failures every bar is 0 and Recharts' auto domain draws 0-400%;
+                keep at least a 0-5% axis so "no failures" reads as flat bars (D-73). */}
+            <YAxis
+              domain={[0, (dataMax: number) => Math.max(dataMax, 0.05)]}
+              tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
+              {...AXIS_PROPS}
+            />
             <Tooltip
               content={<ChartTooltip formatValue={(v) => formatPercent(Number(v), 1)} />}
               labelFormatter={(label) => stageLabel(String(label))}
@@ -88,8 +94,10 @@ function CostByProviderChart({ operations, synthetic }: { operations: Operations
 
   return (
     <ChartCard title="Cost per day by provider" hint="Exa / OpenAI / ElevenLabs" synthetic={synthetic} wide>
-      {data.length === 0 ? (
-        <EmptyChart />
+      {order.length === 0 ? (
+        // Also when every row is a $0 provider (local ffmpeg, fake adapters): a
+        // grid with no bars looks broken (D-73).
+        <EmptyChart label="No provider spend in this range" />
       ) : (
         <>
           <ResponsiveContainer width="100%" height={220}>

@@ -1,0 +1,14 @@
+# No API keys needed: every provider is a fake adapter (no network calls, $0).
+# Episodes are real pipeline runs with canned articles, a canned script and
+# silent audio, so every page and every dashboard chart can be exercised.
+#   docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build
+services:
+  api:
+    environment:
+      SEARCH_PROVIDER: fake
+      LLM_PROVIDER: fake
+      CLASSIFIER_PROVIDER: fake
+      TTS_PROVIDER: fake
+      # Voices are copied into each new user's preferences; fake TTS ignores them.
+      DEFAULT_VOICE_HOST_A: ErXwobaYiN019PkySvjV
+      DEFAULT_VOICE_HOST_B: 21m00Tcm4TlvDq8ikWAM

@@ -120,6 +120,29 @@ def test_logs_stage_entry_and_failure_at_error_level(db, monkeypatch, caplog) ->
     assert failure_records[0].levelno == logging.ERROR
 
 
+def test_adapter_setup_failure_fails_the_episode_instead_of_leaving_it_stuck(
+    db, monkeypatch
+) -> None:
+    """D-73: a missing API key makes a real adapter raise at construction. The
+    episode must end up failed (and retryable), not stuck in progress."""
+    episode = make_user_with_episode(db)
+
+    def _no_key(*_args, **_kwargs):
+        raise RuntimeError("EXA_API_KEY is not set; cannot construct ExaSource")
+
+    monkeypatch.setattr("app.pipeline.runner.get_adapters", _no_key)
+    result = run_episode(episode.id)
+
+    assert result.status == EpisodeStatus.FAILED
+    assert result.failed_stage == "planning"
+    assert "EXA_API_KEY is not set" in result.error
+    steps = _steps_for(db, episode.id)
+    assert [(s.stage, s.status) for s in steps] == [("planning", StepStatus.FAILED)]
+
+    monkeypatch.undo()
+    assert run_episode(episode.id).status == EpisodeStatus.READY
+
+
 class _ProcessKilled(BaseException):
     """Stands in for the process dying mid-stage: a BaseException, so the
     runner's `except Exception` doesn't turn it into a clean stage failure."""

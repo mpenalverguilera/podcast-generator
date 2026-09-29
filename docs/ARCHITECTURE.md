@@ -41,7 +41,7 @@
 | Dashboard | Metric list | Built. Rating breakdown is a true partition (liked + disliked + not rated = 100%) | D-51 to D-55 |
 | `pipeline_steps` | 13 columns | Adds `usage_source`, `provider_request_id`, `fallback_count`. A `system` provider row records an interrupted run | D-16, D-38, D-44 |
 | Grounding | One check at the end of scripting | One check **per section**, reason-first, also grounds audio tags | D-30, D-59, D-65, D-68 |
-| Packaging | `docker compose up` | **Only `docker compose up -d db` works.** The `api` service has no Dockerfile and `web` is a placeholder. The app runs with `uv` and `npm` | D-72 |
+| Packaging | `docker compose up` | `docker compose up --build` runs db, api (migrates and seeds on start) and web (nginx). `docker-compose.fake.yml` runs it on fake providers with no keys | D-73 |
 
 ---
 
@@ -732,7 +732,12 @@ flowchart LR
 ## 12. Running it and deployment
 
 - **Local (works):** `python scripts/setup.py` (installs `uv`, creates `.env`, syncs deps, starts Postgres with Docker Compose, migrates, seeds users and synthetic metrics), then `uv run uvicorn app.main:app --reload --reload-dir app` in `backend/` and `npm run dev` in `frontend/`. `ffmpeg` must be on `PATH`. See `README.md`.
-- **Compose (partial):** `docker compose up -d db` starts Postgres 16 with a volume and a health check. The `api` service references `backend/Dockerfile`, which does not exist, and `web` is a placeholder container, so `docker compose up --build` fails (D-72).
+- **Compose (whole app):** `docker compose up --build`, then open `http://localhost:5173` (D-73).
+  - `db`: Postgres 16, a named volume, a health check.
+  - `api`: built from the repo root with `backend/Dockerfile` (the dashboard reads `eval/results/*.json`). Python 3.12, `uv sync --frozen --no-dev`, `ffmpeg`. `backend/docker/entrypoint.sh` runs `alembic upgrade head`, `seed-users` and `seed-metrics` (set `SEED_METRICS=0` to skip), then uvicorn. Compose overrides `DATABASE_URL` (host `db`), `CORS_ORIGINS` and `DATA_DIR=/data` (a named volume for audio and chunks); keys come from `.env`, which is optional.
+  - `web`: `frontend/Dockerfile` builds with Node 22 and serves `dist/` with nginx, falling back to `index.html` for client-side routes. `VITE_API_URL` is a build argument (default `http://localhost:8000`).
+  - **No keys:** `docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build` sets all four providers to fake. Episodes run the real pipeline on canned articles and scripts and produce silent audio.
+- **Dev database only:** `python scripts/setup.py` still starts just `db`, for running the API and web app locally.
 - **Seed accounts:** admin, demo and eval (`cli seed-users`), plus about 150 synthetic dashboard users (`cli seed-metrics`). Synthetic users cannot log in and are never scheduled.
 - **Voice previews:** `GET /voices` returns a `preview_url` only if `data/voice_previews/{voice_id}.mp3` exists. Nothing in the repo generates those files, so on a fresh checkout the ▶ buttons have nothing to play.
 - **Not built:** hosted deployment. A plan is in `solution.md` (next steps).
@@ -775,10 +780,10 @@ Phase 00 confirmed the call shapes (D-09), and later phases added more:
 | 05 API + scheduler | Auth, routes, scheduler, retry, audio | Done (05b, 05c hardening) |
 | 06 Frontend | Pages | Done (06b fixes, sign-up) |
 | 07 Dashboard | Events, metrics, seed, charts | Done |
-| 08 Polish + docs | Sample episode, packaging, README, `solution.md` | Sample, README and `solution.md` done. **Dockerfiles and a one-command demo are not** |
+| 08 Polish + docs | Sample episode, packaging, README, `solution.md` | Done (Docker stack in D-73) |
 | 10 Scripting v2 | Outline, sections, frame, editorial passes | Done (D-59 to D-70) |
 | 09 Stretch | RSS, episode memory, hosted deployment, SSE, CI | **None built** |
 
 ## 16. Known limitations
 
-Single instance only (double-run risk) · no auth hardening (no refresh, no revocation, no rate limiting, open sign-up spends real money up to the daily cap) · no same-event collapsing before selection · the classifier prompt version is not stored on the episode · resuming voicing can mix two voices if the user changes a voice between attempts (D-58) · restart recovery can resume an episode a live CLI is working on (D-59) · article text is never refreshed (D-24) · Jev never returns `is_stale` (D-61) · the seeded episodes and metrics are synthetic · no hosted deployment · the compose file is incomplete (D-72). Each is discussed, with a fix, in `solution.md`.
+Single instance only (double-run risk) · no auth hardening (no refresh, no revocation, no rate limiting, open sign-up spends real money up to the daily cap) · no same-event collapsing before selection · the classifier prompt version is not stored on the episode · resuming voicing can mix two voices if the user changes a voice between attempts (D-58) · restart recovery can resume an episode a live CLI is working on (D-59) · article text is never refreshed (D-24) · Jev never returns `is_stale` (D-61) · the seeded episodes and metrics are synthetic · no hosted deployment · voice preview files are never generated. Each is discussed, with a fix, in `solution.md`.

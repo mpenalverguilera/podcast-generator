@@ -1,0 +1,15 @@
+# Build context for backend/Dockerfile is the repo root: send only what the
+# API image needs. Never send .env or runtime data.
+*
+!backend/
+!eval/results/*.json
+backend/.venv
+backend/data
+backend/tests
+# ...except the fixtures: the fake adapters read their canned articles and
+# scripts from here, and the no-keys demo (docker-compose.fake.yml) needs them.
+!backend/tests/fixtures
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.env

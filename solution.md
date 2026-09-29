@@ -24,9 +24,9 @@
 1. The classifier that decides which stories air is the biggest cost line: **40% of the sample episode** (T-09).
 2. "Quality" is measured with proxies on a handful of episodes and one annotator. There is no listener study and no automatic audio QA (W-01, W-02).
 3. It is a single-instance system with open sign-up and no rate limiting (W-04, W-05).
-4. The Docker packaging was never finished; the app runs with `uv` and `npm` (W-08).
+4. Operationally it is a demo: one `docker compose up` runs it, but there is no CI, no hosting and no observability beyond logs (N-02, N-08, N-10).
 
-**What I would do next, in order.** Finish packaging and CI (N-01, N-02) · put the job runner behind a queue (N-05) · cut ranking cost with a cheap pre-filter and measure it (N-11) · add episode memory (N-13) · run a real listening test (N-19).
+**What I would do next, in order.** CI (N-02) · put the job runner behind a queue (N-05) · cut ranking cost with a cheap pre-filter and measure it (N-11) · add episode memory (N-13) · run a real listening test (N-19).
 
 ---
 
@@ -40,11 +40,11 @@
 | React app: login, sign-up, interests, episodes and player, transcript, admin dashboard | Built | `frontend/src/` |
 | Classifier eval (Luna vs Sol vs Jev, 60 labelled rows) and a stale-article eval | Built, results committed | `eval/`, D-44, D-45, D-61 |
 | Admin dashboard with real and seeded data, honestly labelled | Built | D-51 to D-55 |
-| Fake adapters for every provider, 254 tests | Built | `backend/tests/` (D-65 records 254) |
-| One-command Docker demo | **Not built** | W-08, D-72 |
+| Fake adapters for every provider, 257 tests | Built, all passing on 2026-09-29 | `backend/tests/`, D-73 |
+| One-command Docker stack, plus a no-keys demo on fake providers | Built and run end to end | `docker-compose.yml`, `docker-compose.fake.yml`, T-28, D-73 |
 | RSS sources, episode memory, hosted deployment, SSE, CI | **Not built** | §9 |
 
-**Screenshots** (`docs/screenshots/`): `login.png`, `signup.png`, `prodcast-settings.png`, `profile-generation.png`, `profile-detail.png`, `episode.png`, `episode-detail.png`. There is no dashboard screenshot yet **[CONFIRM: add one]**.
+**Screenshots** (`docs/screenshots/`): `login.png`, `signup.png`, `prodcast-settings.png`, `profile-generation.png`, `profile-detail.png`, `episode.png`, `episode-detail.png`. Admin dashboard, captured from the Docker stack on fake providers (D-73): `admin-overview.png`, `admin-product.png`, `admin-operations.png`, `admin-quality.png`, and `admin-operations-real-only.png` (synthetic data off: only what one fake episode recorded).
 
 ## 2. Architecture at a glance
 
@@ -289,13 +289,20 @@ Each item: **Decision**, **Why**, **Alternatives I rejected**, **What it costs**
 - **Costs.** **The recorded sample cost is probably not at the configured rate.** The sample's voicing row says $0.294 for a transcript of about 6,700 characters, which is about $0.044 per 1,000 characters; the default is $0.11, which would give about $0.74 (*arithmetic*). I suspect a local `.env` override **[CONFIRM]**. Section 6 shows both.
 
 #### T-26 Testing: fakes only, and manual real-provider acceptance runs recorded in the log
-- **Decision.** Tests never hit real APIs; 254 tests are recorded at D-65, and at the last recorded run one pre-existing test failed on `main` (D-71). Real runs happen through the CLI, and their cost and result are written into `DECISIONS.md` (for example D-27, D-64). Fixture dates are rebased to "now" so the recency gate does not age out (D-49).
+- **Decision.** Tests never hit real APIs; 257 tests, all passing on 2026-09-29 (D-73). A browser run of the Docker stack on fake providers (sign in, build a profile, generate, play, rate, open the dashboard) is scripted but not in the repo. Real runs happen through the CLI, and their cost and result are written into `DECISIONS.md` (for example D-27, D-64). Fixture dates are rebased to "now" so the recency gate does not age out (D-49).
 - **Costs.** No CI (N-02). **No frontend tests at all**, and `types.ts` is hand-written from the Pydantic schemas with nothing to catch drift (D-41). No browser test drove the app end to end (D-53 records that no browser was available). I did not re-run the test suite for this documentation pass.
 
 #### T-27 Process: phases, a decision log, one bootstrap script
 - **Decision.** The build was split into phases with acceptance checks (`docs/phases/`), every non-trivial decision was logged (72 entries), one virtualenv only, and `scripts/setup.py` as the single bootstrap (D-10, D-11).
 - **Why.** The judged items are the sample, this document, and whether I understand every decision; the log is the raw material for this file.
 - **Costs.** The log is long (about 265 KB) and some entries are dense. Earlier merges damaged it twice (D-62's body replaced by D-58's, a chore numbered D-66 twice); I repaired both in D-72 and added an index.
+
+#### T-28 Packaging: one `docker compose up`, and a no-keys demo on fake adapters
+- **Decision.** Three services: `db` (Postgres 16), `api` (Python 3.12 + `uv` + `ffmpeg`; its entrypoint runs `alembic upgrade head`, `seed-users` and `seed-metrics`, then uvicorn) and `web` (a Vite build served by nginx with an SPA fallback). `docker-compose.fake.yml` switches all four adapters to fakes, so a reviewer with no API keys can use every page, generate episodes and see the dashboard fill in. `python scripts/setup.py` still starts only `db`, for development with `uv` and `npm` (D-73).
+- **Why.** A reviewer will try to run it. The fake adapters already existed for tests; reusing them turned the no-keys case into a working demo instead of an error screen.
+- **Rejected.** A `Makefile` (not on a default Windows machine, and the author works on Windows). Migrations in a separate one-shot service (more moving parts for a single-user demo). Putting the API behind nginx on one origin (changes CORS and the media-token URLs for no demo benefit).
+- **Costs.** `VITE_API_URL` is baked in at build time, so the web image must be rebuilt for another API address. Seeding on every start replaces the synthetic dashboard data each time (deterministic per day). Fake episodes are silent, with a canned script, so they show the mechanics, not the quality: `sample.mp3` is the quality evidence.
+- **Evidence.** Built and run end to end on 2026-09-29 from an empty database: sign-in, profile, a generated episode (6.4 s on fakes), playback, rating, and the dashboard (screenshots in `docs/screenshots/admin-*.png`). A restart with an episode in flight recovered it and auto-resumed it to `ready`. Running it also found two bugs, both fixed: the fake adapters' fixtures were excluded from the image, and an adapter that failed to construct left its episode stuck forever (§5).
 
 ---
 
@@ -328,6 +335,7 @@ Each item: **Decision**, **Why**, **Alternatives I rejected**, **What it costs**
 | Daily cap reached | Runner | Stage fails with "daily spend cap exceeded" |
 | Double click / concurrent generate | Partial unique index | 409 |
 | Provider call hangs | OpenAI client: 90 s timeout, 1 retry | Stage fails; Retry resumes from it |
+| An adapter can't be built (e.g. missing API key) | Runner, before the first stage | Episode fails at the stage it would have started, retryable. It used to stay `pending` forever and block the user (fixed in D-73) |
 | `ffmpeg` missing | Assemble stage | Fails with a clear message; voicing is already paid, so Retry resumes at assembling only |
 
 **Classifier eval, in one place.**
@@ -400,7 +408,7 @@ What the earlier samples showed: episode 2875 (6-minute, first sample) cost $1.1
 | W-05 | **Open sign-up with no rate limit, email check or per-user cap; the token is in `localStorage`; no refresh or revocation** | Anyone reaching the API can spend the daily cap | D-33, D-47 |
 | W-06 | **Ranking cost is 40% of an episode**, and classification is never shared between users | Unit economics (§6) | T-09 |
 | W-07 | **The eval set is small:** 60 rows, one annotator, near-duplicate clusters; the stale set is 12 of 16 new rows synthetic | The decisions are sound but the confidence intervals are wide | D-44, D-61 |
-| W-08 | **Packaging is unfinished:** no Dockerfiles (`docker compose up --build` fails), no one-command demo, the voice preview files are never generated, no dashboard screenshot | A reviewer must install `uv`, Node, Docker (for Postgres) and `ffmpeg` | D-72 |
+| W-08 | **Packaging gaps left:** voice preview files are never generated (the ▶ buttons have nothing to play); the web image bakes the API address in at build time; the API container runs migrations and seeds on every start, which suits a demo, not a shared deployment | Small, but visible to a reviewer | D-73 |
 | W-09 | **Episodes miss their length target** (sample −21% words, 7:36 vs 10:00) and 135 wpm comes from one measurement | Users choose a length | T-15 |
 | W-10 | **Same-event duplicates** can both be selected; no deterministic collapse | Audible repetition | D-22 |
 | W-11 | **Article text and Exa dates are trusted**; text is never refreshed; a republish date can hide an old story | Stale news | D-24, D-62 |
@@ -464,8 +472,8 @@ flowchart LR
 
 | ID | Step | Why | Effort | Depends |
 |---|---|---|---|---|
-| N-01 | **Dockerfiles for `api` and `web`, fix `docker-compose.yml`, a `make demo`; generate the voice-preview files; add a dashboard screenshot** | A reviewer should run it with one command (W-08); phase 08 Part B was skipped | S–M | — |
-| N-02 | **CI on GitHub Actions:** ruff, pytest with fakes, `tsc` and lint for the frontend, and a nightly classifier eval on the fixture set | Nothing runs the 254 tests except me (T-26). Also add frontend tests for the player and settings flows | S–M | — |
+| N-01 | ~~Dockerfiles for `api` and `web`, fix `docker-compose.yml`, a one-command demo, a dashboard screenshot~~ **Done (D-73).** Left: generate the voice-preview files; move migrations and seeding to a one-shot job before a shared deployment | W-08 | S | — |
+| N-02 | **CI on GitHub Actions:** ruff, pytest with fakes, `tsc` and lint for the frontend, and a nightly classifier eval on the fixture set | Nothing runs the 257 tests except me (T-26). Also add frontend tests for the player and settings flows | S–M | — |
 | N-03 | **Fit words-per-minute and the length model from data:** regress duration on words for every finished episode; store the classifier prompt version on the episode; log word-budget misses per episode | The sample missed by 21% (T-15, W-09, W-13) | S | — |
 | N-04 | **Fix the small correctness gaps:** the attribution rule for outlet names (the "According to Reuters" case), and record voices per chunk so a resume cannot mix them | Both are audible defects (D-62, D-58) | S–M | — |
 
@@ -556,5 +564,5 @@ These need your answer before I finalise; none blocks the drafts above.
 3. **The ElevenLabs cost.** Was `ELEVENLABS_USD_PER_1K_CHARS` lowered in your local `.env` (the recorded voicing cost implies about $0.044 per 1,000 characters against the default $0.11)? If so, what is the right number to quote?
 4. **The sample.** Did you generate more than one take of episode 6054 and pick the best? And is its length (7:36 against a 10-minute target) acceptable to say out loud, or should I reword T-15?
 5. **Section 10.** Please tell me which decisions and which listening you did yourself, in your words, and whether you want this section at all.
-6. **Missing material.** Can you add a dashboard screenshot, and do you want me to build N-01 (Dockerfiles and a one-command demo) now, since a reviewer will try to run it?
-7. **Claims to check.** Confirm that the test count (254, with one failure at last record) is still right, since I did not re-run the suite for a documentation change.
+6. ~~Missing material~~ Answered: Docker packaging and the dashboard screenshots are done (D-73).
+7. ~~Claims to check~~ Answered: the suite was re-run on 2026-09-29, 257 passed.

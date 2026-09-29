@@ -1,3 +1,9 @@
+# `docker compose up --build` runs the whole app: Postgres, the API (with the
+# scheduler and pipeline) and the web app. Open http://localhost:5173.
+# Real provider keys come from .env. For a no-keys demo on fake providers:
+#   docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build
+# `python scripts/setup.py` still starts only `db`, for running the API and web
+# app locally with uv and npm. See docs/DECISIONS.md D-73.
 services:
   db:
     image: postgres:16
@@ -15,27 +21,44 @@ services:
       timeout: 5s
       retries: 5
 
-  # backend/Dockerfile doesn't exist yet (phase 08 builds it, per
-  # docs/phases/01-scaffold.md "cut first" — this phase runs the API locally via
-  # uv instead). `docker compose up --build` will fail on this service until then;
-  # `docker compose up -d db` is all phase 01 needs.
   api:
     build:
-      context: ./backend
-    env_file: .env
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # These override .env: inside the network the database host is `db`,
+      # and the browser loads the web app from localhost:5173.
+      DATABASE_URL: postgresql+psycopg://podcast:podcast@db:5432/podcast
+      CORS_ORIGINS: http://localhost:5173
+      DATA_DIR: /data
+    volumes:
+      - audio:/data
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     ports:
       - "8000:8000"
 
-  # Placeholder — real frontend + Dockerfile land in phase 06.
   web:
-    image: node:20-alpine
-    working_dir: /app
-    command: ["sh", "-c", "echo 'web placeholder - built in phase 06'; sleep infinity"]
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
-      - "5173:5173"
+      - "5173:80"
 
 volumes:
   pgdata:
+  audio:

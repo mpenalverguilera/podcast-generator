@@ -74,7 +74,6 @@ def run_episode(
     episode_id: int, stop_after: str | None = None, tts_override: str | None = None
 ) -> Episode:
     settings = get_settings()
-    adapters = get_adapters(settings, {"tts": tts_override} if tts_override else None)
 
     with session_scope() as db:
         episode = db.get(Episode, episode_id)
@@ -86,6 +85,32 @@ def run_episode(
             return episode
 
         start = _start_index(episode)
+        try:
+            adapters = get_adapters(settings, {"tts": tts_override} if tts_override else None)
+        except Exception as exc:
+            # A real adapter refuses to construct without its API key. Outside
+            # this handler the thread died and left the episode in progress
+            # forever, so every later Generate got a 409 until a restart.
+            # Fail it at the stage it would have started, retryable. D-73.
+            stage_name = STAGE_ORDER[start][0].value
+            now = datetime.now(UTC)
+            db.add(
+                PipelineStep(
+                    episode_id=episode.id,
+                    stage=stage_name,
+                    status=StepStatus.FAILED,
+                    provider="unknown",
+                    started_at=now,
+                    finished_at=now,
+                    error=f"adapter setup failed: {exc}",
+                )
+            )
+            episode.status = EpisodeStatus.FAILED
+            episode.failed_stage = stage_name
+            episode.error = f"adapter setup failed: {exc}"
+            logger.error("episode %s could not start: adapter setup failed: %s", episode.id, exc)
+            return episode
+
         logger.info(
             "episode %s pipeline start: resuming from stage %s%s",
             episode.id,

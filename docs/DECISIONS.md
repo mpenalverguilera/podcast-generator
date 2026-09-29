@@ -91,6 +91,7 @@ Status is about the decision as it stands today. Entries are never rewritten aft
 | D-70 | Short turns as a soft target | 2026-09-28 | Active |
 | D-71 | Trailing silence on the episode | 2026-09-29 | Active |
 | D-72 | Documentation refresh, DECISIONS repaired | 2026-09-29 | Active |
+| D-73 | Docker packaging, no-keys demo, runner and dashboard fixes | 2026-09-29 | Active |
 
 ---
 
@@ -1064,6 +1065,7 @@ A read of the v4 script for entertainment value found it accurate but flat: all 
 **Open:** "those numbers we opened with" is a softer reference to the show's structure; the hook fact comes back a third time in the outro; the preview hedges ("That isn't a count of vulnerable machines", "No approval has been announced"); Sonnet ends on a migration-setting detail. Hedging with null `tension` and the "distinction" tic are left as they are by the user's choice.
 
 ## D-71 — Assemble: trailing silence so the episode doesn't cut off abruptly (2026-09-29, chore; first numbered D-66 by mistake, renumbered because D-66 is the highlights entry)
+> **Status:** Active. The pre-existing test failure it mentions passed on the next full run (D-73).
 **Context.** The user listened to `sample.mp3` and noted the episode ends the instant the last host stops talking, with no room to breathe before the file just stops.
 
 **Decision.** `assemble.py` appends a fixed `_OUTRO_SILENCE_MS = 1500` pad of silence after the last chunk, before export — longer than the existing `_SILENCE_MS = 600` inter-section gap so the tail reads as a deliberate close rather than another section boundary. `episode.duration_s` (`len(combined) / 1000.0`) naturally includes it since it's added before that line runs. `docs/ARCHITECTURE.md` §5.7 updated to mention the outro pad alongside the section-boundary silence it already documented.
@@ -1073,6 +1075,7 @@ A read of the v4 script for entertainment value found it accurate but flat: all 
 **Consequences.** Every future episode's total duration grows by 1.5 s. No test asserts the exact tail length (existing `test_run_applies_the_real_loudnorm_filter` only checks `duration_s > 0`), so a future change to the constant won't need a test update. 253 of 254 tests pass; the one failure (`test_script_run.py::test_trace_writes_nothing_when_script_trace_dir_is_unset`) reproduces identically on `main` before this change (verified via `git stash`) and is left untouched, out of scope. `ruff check`/`ruff format` clean.
 
 ## D-72 — Documentation refresh: ARCHITECTURE to v1.0, diagrams, `solution.md`, DECISIONS repaired (2026-09-29, phase 08 Part C)
+> **Status:** Active. Its packaging finding was fixed in D-73.
 **Context.** The build is finished. `docs/ARCHITECTURE.md` was last revised at v0.8 (phase 05) and still described the v1 pipeline: a single-call script writer, a polish step, 3–12 minute episodes, a Luna/Jev classifier, no sign-up, no parallel voicing. D-64 had already flagged this. Reading `DECISIONS.md` end to end for the refresh also turned up structural damage from earlier merges. The reviewers read `solution.md`, and it did not exist yet.
 
 **Decision.**
@@ -1089,3 +1092,25 @@ A read of the v4 script for entertainment value found it accurate but flat: all 
 **Alternatives.** Patching ARCHITECTURE.md in place with dated notes — rejected: v0.8 plus a stack of corrections is harder to read than one current document, and the history is already in this log. Separate diagram files (`.drawio`, PNG) — rejected: they go stale without anyone noticing. Rewriting old decision entries to match today's code — rejected: the log is a record of what was decided and why at the time; the Status lines carry the changes.
 
 **Consequences.** Every claim in ARCHITECTURE.md and `solution.md` should be traceable to a D-number, a file or `sample.meta.json`. If the code changes, update ARCHITECTURE.md in the same commit.
+
+## D-73 — Docker packaging for the whole app, a no-keys demo on fake adapters, and the bugs it found (2026-09-29, phase 08 Part B)
+**Context.** D-72 found that `docker compose up --build` failed: the `api` service pointed at a `backend/Dockerfile` that didn't exist and `web` was a sleeping placeholder. A reviewer who tries to run the app needed Python, `uv`, Node, Docker and `ffmpeg`, plus real API keys before anything could be generated. There was also no dashboard screenshot.
+
+**Decision.**
+- **`backend/Dockerfile`**, built from the repo root because `metrics.EVAL_RESULTS_DIR` reads `eval/results/*.json`, outside `backend/`. It uses `python:3.12-slim`, `ffmpeg` from apt, `uv` pinned to the version the lockfile was made with, and `uv sync --frozen --no-dev` into `/opt/venv` (dependencies first, for layer caching). `backend/docker/entrypoint.sh` runs `alembic upgrade head`, `seed-users` and `seed-metrics` (skip it with `SEED_METRICS=0`), then `exec`s uvicorn. All three are idempotent.
+- **`frontend/Dockerfile`**: `npm ci && npm run build` on Node 22 (so `tsc -b` runs in every image build), then nginx with a fallback to `index.html` for client-side routes and long caching for hashed assets. `VITE_API_URL` is a build argument.
+- **`.dockerignore`** at the root (the API build context) sends only `backend/` and `eval/results/*.json`, never `.env`, `.venv` or `data/`. It excludes `backend/tests/` **except `backend/tests/fixtures/`**, because `FakeSearchSource` reads its canned Exa responses from there. `frontend/.dockerignore` excludes `node_modules`, `dist` and `.env*`.
+- **`docker-compose.yml`**: `api` waits for a healthy `db`; `web` waits for a healthy `api` (health check on `/health`). Compose overrides `DATABASE_URL` (host `db`), `CORS_ORIGINS` and `DATA_DIR=/data` (a named `audio` volume). `.env` is loaded with `required: false`, so the stack starts without one.
+- **`docker-compose.fake.yml`**: sets all four providers to `fake` and the two default voice ids (copied into every new user's preferences; fake TTS ignores them). A reviewer without keys can use every page and generate episodes. `python scripts/setup.py` is unchanged: it still starts only `db` for local development.
+
+**Verified (2026-09-29).** The images were built from these files and run with these compose files, twice from an empty database (`down -v`). A Playwright script drove the app like a user: sign in as demo, answer the guided interview, build and save the profile, generate an episode with a focus request (ready in 6.4 s on fakes), play it, rate it, then sign in as admin and capture each dashboard section. No page errors and no 5xx responses. With "Include synthetic data" off, the dashboard showed exactly what that one episode recorded: timing for all 8 stages, 0% failures, one liked session under `sections-v7`, 0 grounding flags. That is the evidence that the whole pipeline ran end to end in the containers. A restart with an episode stuck in flight marked it `interrupted` and auto-resumed it to `ready` (D-38, now also exercised in Docker). `uv run pytest -q`: 257 passed (the test D-71 recorded as failing passed too); `ruff check` and `ruff format --check` clean. Screenshots: `docs/screenshots/admin-overview.png`, `admin-product.png`, `admin-operations.png`, `admin-quality.png`, `admin-operations-real-only.png`.
+Two sandbox-only differences, so the claim is exact: the build sandbox's egress policy blocks `deb.debian.org`, so the test image got the same `ffmpeg` role from PyPI's `imageio-ffmpeg` (static build, `libmp3lame` checked) instead of the Dockerfile's `apt-get install ffmpeg` line; and the sandbox's CA and proxy were injected after `FROM` for the build. Every other line of both Dockerfiles, and both compose files, ran unchanged. The `apt-get` line itself was not exercised here.
+
+**Bugs found by running it, fixed.**
+1. *Packaging:* the first `.dockerignore` excluded all of `backend/tests/`, so the fake demo's first episode crashed on a missing fixture. Fixed by keeping `backend/tests/fixtures/`.
+2. *Runner (pre-existing):* `run_episode` built the adapters **before** its error handling. A real adapter raises at construction when its key is missing, so the thread died and the episode stayed `pending` forever. The one-in-progress index (D-37) then made every later Generate a 409 until the API restarted. That's the first thing a reviewer without keys would hit. Now adapter construction happens inside the run: on failure the episode is marked failed at the stage it would have started, with a FAILED `pipeline_steps` row (`error="adapter setup failed: ..."`), and Retry works once keys are set. Test: `test_adapter_setup_failure_fails_the_episode_instead_of_leaving_it_stuck`.
+3. *Dashboard (pre-existing, first seen with all-zero data):* "Failure rate by stage" drew a 0–400% axis when no stage had failed; its y-axis now spans at least 0–5%. "Cost per day by provider" drew an empty grid when all spend was $0 (fake adapters, local ffmpeg); it now shows "No provider spend in this range".
+
+**Alternatives.** A `Makefile` or `scripts/demo.sh` (the phase doc's suggestion) — rejected: two compose commands are as short, and `make` isn't on a default Windows machine, which is the author's. Migrations and seeds as a separate one-shot compose service — rejected for a single-user demo; noted in `solution.md` N-01 as the step before a shared deployment. Serving the API behind nginx on the same origin — rejected: it would change CORS and the media-token URLs (D-40) for no demo benefit. Committing the Playwright script — not done: it needs Node and Playwright beyond the project's dependencies, and would belong in the CI job (N-02) rather than the repo root.
+
+**Consequences.** `VITE_API_URL` is baked in at build time; serving the API anywhere but `localhost:8000` needs a web rebuild with that build argument. Every API start replaces the synthetic dashboard data (deterministic per day). Voice previews still have no files (W-08). A fake episode is silent with a canned script: it proves the mechanics, not the quality.
