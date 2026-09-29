@@ -1,20 +1,20 @@
 # Personal Podcast Generator — solution overview, architecture and trade-offs
 
 > **AUTHOR NOTES — delete this box before submitting.**
-> - Cost and time numbers in §3.7 are built from every saved real run: 2 full episodes (2875, 6054), 9 traced scripting runs (`data/tmp/*/calls.json`) and the voicing benchmarks in D-56. To replace them with fresh numbers, run `uv run --project backend python scripts/measure_costs.py run` from the repo root (4 × 10-minute episodes stopped after scripting, about $2.20, no ElevenLabs credit), then paste the medians it prints into the §3.7 table.
-> - `sample.meta.json` records $0.294 for voicing, but the sample's transcript is 6,684 characters, which is $0.735 at the configured $0.11/1k. The most likely cause is a voicing run interrupted by a restart: chunks finished before it are on disk but their cost was never recorded (T-04's known gap). **[CONFIRM]** that this matches what happened, or re-export the meta.
+> - Cost and time numbers in [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes) are built from every saved real run: 2 full episodes (2875, 6054), 9 traced scripting runs (`data/tmp/*/calls.json`) and the voicing benchmarks in D-56. To replace them with fresh numbers, run `uv run --project backend python scripts/measure_costs.py run` from the repo root (4 × 10-minute episodes stopped after scripting, about $2.20, no ElevenLabs credit), then paste the medians it prints into the [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes) table.
+> - `sample.meta.json` records $0.294 for voicing, but the sample's transcript is 6,684 characters, which is $0.735 at the configured $0.11/1k. The most likely cause is a voicing run interrupted by a restart: chunks finished before it are on disk but their cost was never recorded (a known gap in how interrupted runs are billed). **[CONFIRM]** that this matches what happened, or re-export the meta.
 > - Places where I (Claude) inferred your reasoning are marked **[CONFIRM]**.
 
 ## Contents
-0. TL;DR
-1. Product and scope
-2. Tech stack
-3. How an episode is made
-4. Dashboard: what success means
-5. Architecture in brief
-6. Trade-offs
-7. Limitations and next steps
-8. How I built it
+0. [TL;DR](#0-tldr)
+1. [Product and scope](#1-product-and-scope)
+2. [Tech stack](#2-tech-stack)
+3. [How an episode is made](#3-how-an-episode-is-made)
+4. [Dashboard: what success means](#4-dashboard-what-success-means)
+5. [Architecture in brief](#5-architecture-in-brief)
+6. [Trade-offs](#6-trade-offs)
+7. [Limitations and next steps](#7-limitations-and-next-steps)
+8. [How I built it](#8-how-i-built-it)
 
 ---
 
@@ -22,7 +22,7 @@
 
 - **What it is.** A user describes their interests once. On a schedule, or on demand with an optional "this time I want to hear about X", the backend finds recent news with Exa, picks the stories that fit the listener, writes a two-host script in which every fact is checked against the article it came from, voices it with ElevenLabs and publishes an MP3. An admin dashboard shows product, operations and quality metrics.
 - **Listen first.** `sample.mp3` (episode 6054, *"ElevenLabs v4 and the Live-Call Test"*): 7 min 36 s, 4 stories from 4 sources, 0 unsupported-claim flags. Transcript and sources in `sample.transcript.md`.
-- **What an episode costs and takes** (10-minute target, §3.7): about **$1.35** and **5–6 minutes**. ElevenLabs is about 55% of the cost (an estimate, see §3.7), OpenAI 40%, Exa 6%. Scripting and voicing are about 85% of the time.
+- **What an episode costs and takes** (10-minute target, [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)): about **$1.35** and **5–6 minutes**. ElevenLabs is about 55% of the cost (an estimate, see [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)), OpenAI 40%, Exa 6%. Scripting and voicing are about 85% of the time.
 - **Best decisions.** (1) Grounding is structural: each story is written against only its own sources, fact-checked and patched once. (2) Every stage commits and every paid call is recorded, so a failure never pays twice and cost is visible per stage. (3) The classifier was chosen with an eval whose pass/fail rules were written before the numbers.
 - **Biggest gaps.** (1) One news source, and no merging of stories about the same event. (2) Single-instance only: fine for a demo, not for two servers. (3) Quality is measured with proxies on a handful of episodes and one annotator; there is no listening study.
 
@@ -30,9 +30,9 @@
 
 **What it does.** Two hosts discuss the news that matches a listener's interests, in English, for 6 to 20 minutes (default 10). The user sets their interests through a short guided interview, edits the resulting profile (topics, depth, include/exclude, things to avoid) and tunes the podcast: length, tone, host names and voices, and schedule. They can also generate an episode on demand with a *focus request*, which may be unrelated to their usual interests.
 
-**What it doesn't do.** Only Exa as a news source (no scraping, no social media, no RSS). English only. No public podcast feed and no mobile app. Auth, deployment and scaling are deliberately not production-grade (§7).
+**What it doesn't do.** Only Exa as a news source (no scraping, no social media, no RSS). English only. No public podcast feed and no mobile app. Auth, deployment and scaling are deliberately not production-grade (see [Limitations and next steps](#7-limitations-and-next-steps)).
 
-**Where the time went.** A take-home is a balance between building and finishing. The product succeeds or fails on one thing: whether the episode is worth listening to. So most of the effort went into the pipeline, and within it into story selection and the script. Auth, deployment and scalability were kept simple, but shaped so the next step is small: the app already runs with one `docker compose up`, every provider sits behind an adapter with a fake, and the pipeline runner is idempotent and resumable, which is the hard part of moving to a job queue (§5).
+**Where the time went.** A take-home is a balance between building and finishing. The product succeeds or fails on one thing: whether the episode is worth listening to. So most of the effort went into the pipeline, and within it into story selection and the script. Auth, deployment and scalability were kept simple, but shaped so the next step is small: the app already runs with one `docker compose up`, every provider sits behind an adapter with a fake, and the pipeline runner is idempotent and resumable, which is the hard part of moving to a job queue (see *Getting to production* in [Architecture in brief](#5-architecture-in-brief)).
 
 ## 2. Tech stack
 
@@ -43,7 +43,7 @@ I mirrored Prosper's stack (FastAPI, PostgreSQL, React + TypeScript) so the code
 | API | FastAPI, Python 3.12 | Official SDKs for every provider; request validation and OpenAPI docs come from the same Pydantic models |
 | Validation | Pydantic v2 | Runtime validation at every boundary: request bodies, config, JSONB, and above all **LLM structured outputs** (every model call returns a validated Pydantic object) |
 | DB | PostgreSQL 16, SQLAlchemy 2, Alembic | A partial unique index as the concurrency guard, JSONB for documents, native enums; Alembic for versioned migrations |
-| Jobs | APScheduler in-process, one thread per run | No extra infrastructure; enough for one instance (limits in §5) |
+| Jobs | APScheduler in-process, one thread per run | No extra infrastructure; enough for one instance (limits in [Architecture in brief](#5-architecture-in-brief)) |
 | Audio | ElevenLabs Text to Dialogue (`eleven_v3`), ffmpeg | Native two-speaker dialogue; loudness normalisation and MP3 encoding |
 | Frontend | Vite, React, TanStack Query, Tailwind, Recharts | A single-page app that shows server data: no need for Next.js or server rendering. TanStack Query gives caching and polling without a global store. With no brand to follow, Tailwind and Recharts let the UI move fast |
 | Packaging | `uv`, Docker Compose | Reproducible installs from a lockfile; the whole app in one command, with a no-keys mode on fake providers |
@@ -143,7 +143,7 @@ flowchart TD
 | `gpt-6-luna` (reasoning none / low / medium) | 0.91–0.94 | 0.75 | ~$0.009 | About one wrong story in four; more reasoning didn't help |
 | **`gpt-6-sol`, reasoning none** | 0.99–1.00 | 1.00 | ~$0.18 | **Chosen** |
 
-\* For 60 candidates. Real episodes score about 120 pairs, which is why ranking costs about $0.36 (§3.7).
+\* For 60 candidates. Real episodes score about 120 pairs, which is why ranking costs about $0.36 ([section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)).
 
 Jev was partly an excuse to try something new, and partly the ideal tool for the job: a small model built for exactly this kind of typed yes/no/score question. It won on quality, speed and cost, and lost on availability. Sol costs about 20× Luna, and I accepted that because selection precision is the number the listener feels.
 
@@ -285,7 +285,7 @@ In the order I would tackle them:
 | 2 | No CI | GitHub Actions: pytest, ruff, frontend build | Hours |
 | 3 | Preferences are read live by each stage, so a settings change mid-run or before a retry mixes old and new (stories picked by old interests, written in the new tone) | Snapshot settings on the episode at creation | ~Half a day |
 | 4 | Ranking is ~27% of cost and doesn't scale with length | Cheap pre-filter before Sol, measured against the same eval | A day |
-| 5 | Single instance only | Queue + one locked scheduler + leases (§5) | Days |
+| 5 | Single instance only | Queue + one locked scheduler + leases ([Architecture in brief](#5-architecture-in-brief)) | Days |
 | 6 | One news source, no same-event merging | RSS for niche sources; cluster by event before selection | Days |
 | 7 | Quality measured by proxies | A small listening test; a speech-to-text check of the audio against the script | Days |
 | 8 | Auth is demo-grade | Managed identity provider + short access tokens with revocable refresh tokens; rate limits on sign-up and generation | Days |
