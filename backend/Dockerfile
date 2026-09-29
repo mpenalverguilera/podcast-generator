@@ -26,7 +26,9 @@ COPY backend/ ./
 RUN uv sync --frozen --no-dev
 COPY eval/results/*.json /app/eval/results/
 
-RUN chmod +x docker/entrypoint.sh
+# Strip CRLF in case the checkout has Windows line endings: a "#!/bin/sh\r"
+# shebang fails with "no such file or directory". No-op on an LF file.
+RUN sed -i 's/\r$//' docker/entrypoint.sh && chmod +x docker/entrypoint.sh
 EXPOSE 8000
 ENTRYPOINT ["docker/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
