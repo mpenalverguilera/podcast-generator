@@ -138,8 +138,8 @@ flowchart TB
 
   RE --> F["fetch: 4 workers<br/>one Exa search each"]
   RE --> R["rank: 8 workers<br/>one classifier call each"]
-  RE --> V["voice: up to 4 workers<br/>process-wide semaphore in the ElevenLabs adapter"]
   RE -. sequential .-> S["script: outline, sections, frame<br/>one LLM call at a time"]
+  RE --> V["voice: up to 4 workers<br/>process-wide semaphore in the ElevenLabs adapter"]
 ```
 
 Rules that keep this safe: worker threads touch only adapters and the file system, never the SQLAlchemy session (fetch, rank, voice all write to the DB back on the run's own thread). Every run opens its own session (`session_scope()`).
