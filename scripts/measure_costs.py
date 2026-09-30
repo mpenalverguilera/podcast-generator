@@ -56,10 +56,13 @@ def _ensure_user(email: str, answers_path: Path) -> None:
 
             user = create_user(db, email, secrets.token_urlsafe(16))
             db.flush()
-        if user.preferences.interest_profile:
+        # New users start with {"topics": [], "avoid": []}: that is not a profile.
+        if (user.preferences.interest_profile or {}).get("topics"):
             return
         answers = json.loads(answers_path.read_text(encoding="utf-8"))
         profile, usage = extract_profile(answers, get_llm(get_settings()))
+        if not profile.topics:
+            raise SystemExit(f"{email}: profile extraction returned no topics; stopping")
         user.preferences.interest_profile = profile.model_dump()
         print(f"{email}: profile extracted (${usage.cost_usd:.4f}), {len(profile.topics)} topics")
 
