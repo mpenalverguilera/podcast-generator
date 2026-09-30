@@ -1,7 +1,6 @@
 # Personal Podcast Generator — solution overview, architecture and trade-offs
 
 > **AUTHOR NOTES — delete this box before submitting.**
-> - Cost and time numbers in [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes) are built from every saved real run: 2 full episodes (2875, 6054), 9 traced scripting runs (`data/tmp/*/calls.json`) and the voicing benchmarks in D-56. To replace them with fresh numbers, run `uv run --project backend python scripts/measure_costs.py run` from the repo root (4 × 10-minute episodes stopped after scripting, about $2.20, no ElevenLabs credit), then paste the medians it prints into the [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes) table.
 > - `sample.meta.json` records $0.294 for voicing, but the sample's transcript is 6,684 characters, which is $0.735 at the configured $0.11/1k. The most likely cause is a voicing run interrupted by a restart: chunks finished before it are on disk but their cost was never recorded (a known gap in how interrupted runs are billed). **[CONFIRM]** that this matches what happened, or re-export the meta.
 > - Places where I (Claude) inferred your reasoning are marked **[CONFIRM]**.
 
@@ -22,7 +21,7 @@
 
 - **What it is.** A user describes their interests once. On a schedule, or on demand with an optional "this time I want to hear about X", the backend finds recent news with Exa, picks the stories that fit the listener, writes a two-host script in which every fact is checked against the article it came from, voices it with ElevenLabs and publishes an MP3. An admin dashboard shows product, operations and quality metrics.
 - **Listen first.** `sample.mp3` (episode 6054, *"ElevenLabs v4 and the Live-Call Test"*): 7 min 36 s, 4 stories from 4 sources, 0 unsupported-claim flags. Transcript and sources in `sample.transcript.md`.
-- **What an episode costs and takes** (10-minute target, [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)): about **$1.35** and **5–6 minutes**. ElevenLabs is about 55% of the cost (an estimate, see [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)), OpenAI 40%, Exa 6%. Scripting and voicing are about 85% of the time.
+- **What an episode costs and takes** (10-minute target, [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)): about **$1.27** and **about 7 minutes** (medians of 4 measured episodes). ElevenLabs is about 56% of the cost (an estimate, see [section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)), OpenAI 39%, Exa 5%. Scripting is about 80% of the time.
 - **Best decisions.** (1) Grounding is structural: each story is written against only its own sources, fact-checked and patched once. (2) Every stage commits and every paid call is recorded, so a failure never pays twice and cost is visible per stage. (3) The classifier was chosen with an eval whose pass/fail rules were written before the numbers.
 - **Biggest gaps.** (1) One news source, and no merging of stories about the same event. (2) Single-instance only: fine for a demo, not for two servers. (3) Quality is measured with proxies on a handful of episodes and one annotator; there is no listening study.
 
@@ -143,7 +142,7 @@ flowchart TD
 | `gpt-6-luna` (reasoning none / low / medium) | 0.91–0.94 | 0.75 | ~$0.009 | About one wrong story in four; more reasoning didn't help |
 | **`gpt-6-sol`, reasoning none** | 0.99–1.00 | 1.00 | ~$0.18 | **Chosen** |
 
-\* For 60 candidates. Real episodes score about 120 pairs, which is why ranking costs about $0.36 ([section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)).
+\* For 60 candidates. Real episodes score about 120 pairs, which is why ranking costs about $0.28 ([section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)).
 
 Jev was partly an excuse to try something new, and partly the ideal tool for the job: a small model built for exactly this kind of typed yes/no/score question. It won on quality, speed and cost, and lost on availability. Sol costs about 20× Luna, and I accepted that because selection precision is the number the listener feels.
 
@@ -193,25 +192,25 @@ Assembly joins the chunks with short pauses, normalises loudness to −16 LUFS w
 
 ### 3.7 What an episode costs and how long it takes
 
-For a 10-minute target on the current pipeline:
+For a 10-minute target on the current pipeline (median of 4 measured episodes; range in brackets):
 
 | Stage | Provider | Cost | Time |
 |---|---|---|---|
-| Planning | OpenAI `gpt-6-luna` | $0.0003 | ~5 s |
-| Fetching (~11 searches) | Exa | $0.077 | 9–12 s |
-| Ranking (~120 pairs, 8 in parallel) | OpenAI `gpt-6-sol` | $0.35–0.37 | 5–16 s |
-| Extracting | Exa | ≤ $0.005 | ~1 s |
-| Scripting, including the fact-check | OpenAI `gpt-6-sol` + `gpt-6-luna` | $0.15–0.20 | 2–4 min |
-| Voicing (~6,700 characters) | ElevenLabs `eleven_v3` | ~$0.74 **(estimate)** | ~1–2 min |
-| Assembling | local ffmpeg | $0 | 8–23 s |
-| **Total** | | **≈ $1.35** | **≈ 5–6 min** |
+| Planning | OpenAI `gpt-6-luna` | $0.0002 | 4 s (3–4) |
+| Fetching (~11 searches) | Exa | $0.063 ($0.042–0.070) | 8 s (6–10) |
+| Ranking (~120 pairs, 8 in parallel) | OpenAI `gpt-6-sol` | $0.279 ($0.179–0.310) | 4 s (2–5) |
+| Extracting | Exa | $0.005 | 1 s |
+| Scripting, including the fact-check | OpenAI `gpt-6-sol` + `gpt-6-luna` | $0.212 ($0.158–0.233) | 330 s (220–658) |
+| Voicing (~6,500 characters) | ElevenLabs `eleven_v3` | $0.715 **(estimate)** | ~44 s **(estimate)** |
+| Assembling | local ffmpeg | $0 | 15 s |
+| **Total** | | **$1.27** | **≈ 404 s (≈ 7 min)** |
 
-**By provider:** ElevenLabs ≈ 55% (estimate), OpenAI ≈ 40%, Exa ≈ 6%. **By time:** scripting ≈ 60%, voicing ≈ 25%, everything else ≈ 15%.
+**By provider:** ElevenLabs ≈ 56% (estimate), OpenAI ≈ 39%, Exa ≈ 5%. **By time:** scripting including the fact-check ≈ 81%, voicing ≈ 11% (estimate), everything else ≈ 8%.
 
-*Sources:* episodes 2875 (6 min: $1.15 recorded, all measured) and 6054 (10 min, the sample); 9 traced scripting runs; the voicing benchmarks in D-56. ElevenLabs dollars are **characters × $0.11 per 1,000**, an estimate because the real plan price isn't visible with this key; the character count itself is exact (from ElevenLabs' `character-cost` header).
+*Sources:* medians of 4 measured 10-minute episodes (13747, 13748, 13749, 13750; `eval/results/cost_timing_2026-09-30.md`), stopped after scripting so ElevenLabs was not called, plus the measured voicing benchmark in D-56 (chunks of about 40 characters per second, up to 4 in parallel). OpenAI and Exa figures are exact, from the providers' own usage counts. ElevenLabs dollars are **characters × $0.11 per 1,000**, an estimate because the real plan price isn't visible with this key; the character count itself is exact (the same count ElevenLabs reports in its `character-cost` header). The slowest scripting run (658 s) had one section-draft call that stalled for about 9 minutes, so the range is wide while the median is stable.
 
-**What that means.** A daily 10-minute episode costs about $40 per user per month in provider fees. That isn't viable for a consumer product as it stands. Two observations point at the fix:
-- **Ranking is ~27% of the total, and it doesn't shrink with episode length.** It is a classifier, not generation. A cheap pre-filter before Sol, or sharing scores across users for the same article and topic, is the biggest lever I haven't measured yet.
+**What that means.** A daily 10-minute episode costs about $38 per user per month in provider fees. That isn't viable for a consumer product as it stands. Two observations point at the fix:
+- **Ranking is ~22% of the total, and it doesn't shrink with episode length.** It is a classifier, not generation. A cheap pre-filter before Sol, or sharing scores across users for the same article and topic, is the biggest lever I haven't measured yet.
 - **Voicing scales with length.** Shorter defaults, or a cheaper TTS plan, move it almost linearly.
 
 Episodes also come in **shorter than asked**: the sample is 7:36 against 10:00, because every section's length is a ceiling, not a target. I chose that on purpose (padding a thin story sounds worse than a short episode), but the words-per-minute estimate (135) comes from one measurement and should be fitted on the episodes already in the database.
@@ -284,7 +283,7 @@ In the order I would tackle them:
 | 1 | `JWT_SECRET` defaults to `change-me` in a public repo: anyone running the stack unchanged has forgeable admin tokens | Refuse to start with the default; generate one in `setup.py` | Minutes |
 | 2 | No CI | GitHub Actions: pytest, ruff, frontend build | Hours |
 | 3 | Preferences are read live by each stage, so a settings change mid-run or before a retry mixes old and new (stories picked by old interests, written in the new tone) | Snapshot settings on the episode at creation | ~Half a day |
-| 4 | Ranking is ~27% of cost and doesn't scale with length | Cheap pre-filter before Sol, measured against the same eval | A day |
+| 4 | Ranking is ~22% of cost and doesn't scale with length | Cheap pre-filter before Sol, measured against the same eval | A day |
 | 5 | Single instance only | Queue + one locked scheduler + leases ([Architecture in brief](#5-architecture-in-brief)) | Days |
 | 6 | One news source, no same-event merging | RSS for niche sources; cluster by event before selection | Days |
 | 7 | Quality measured by proxies | A small listening test; a speech-to-text check of the audio against the script | Days |

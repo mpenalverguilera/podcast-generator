@@ -93,6 +93,7 @@ Status is about the decision as it stands today. Entries are never rewritten aft
 | D-72 | Documentation refresh, DECISIONS repaired | 2026-09-29 | Active |
 | D-73 | Docker packaging, no-keys demo, runner and dashboard fixes | 2026-09-29 | Active |
 | D-74 | ARCHITECTURE review: retry, single-instance, auth and live-preferences limits | 2026-09-29 | Active |
+| D-75 | Measured cost and timing per episode | 2026-09-30 | Active |
 
 ---
 
@@ -1126,3 +1127,10 @@ Two sandbox-only differences, so the claim is exact: the build sandbox's egress 
 - §16: added that preferences are read live per stage, not snapshotted (only the voice case, D-58, was listed), and that the transcript labels speakers with the current host names.
 **Alternatives.** Fixing the live-preferences gap in code now (a `settings_snapshot` JSONB column) — deferred: documented as a limitation with its fix, to be decided separately.
 **Consequences.** `solution.md` should carry the same limitations when it is written up.
+
+## D-75 — Measured cost and timing per episode replace the estimates in solution.md §3.7 (2026-09-30)
+**Context.** The cost and time table in `solution.md` §3.7 was assembled from two saved full episodes, nine traced scripting runs and the D-56 voicing benchmarks. It mixed a 6-minute and a 10-minute episode and was partly estimated.
+**Decision.** Measured four fresh 10-minute episodes with `scripts/measure_costs.py run`: four users (`measure-*@example.com`), each with a profile extracted from the eval answers (3–5 topics), one episode each (ids 13747–13750), run with `--stop-after scripting` semantics so **ElevenLabs was not called** (no credit). Voicing cost is the exact character count × `ELEVENLABS_USD_PER_1K_CHARS` ($0.11, an estimate, D-12) and voicing time is ~40 characters per second per chunk with up to 4 chunks in parallel (D-56). Every other stage is read from `pipeline_steps` (exact tokens and Exa `costDollars`). Full table: `eval/results/cost_timing_2026-09-30.md`.
+**Medians of 4.** Total **$1.27** and **404 s (~7 min)**. Planning $0.000 / 4 s; fetching $0.063 / 8 s; ranking $0.279 / 4 s; extracting $0.005 / 1 s; scripting incl. fact-check $0.212 / 330 s; voicing $0.715 / 44 s (both estimates); assembling $0 / 15 s. By provider: ElevenLabs 56% (estimate), OpenAI 39%, Exa 5%. By time: scripting 81%, voicing 11%, rest 8%. Ranking is 22% of the cost. Scripts came out at 1,028–1,209 words against a 1,350-word budget (outside the ±20% target), so the "10-minute" episodes are about 8 minutes of audio. Scripting range was 220–658 s: episode 13749 had one section-draft call stall for about 9 minutes.
+**Finding.** `sample.meta.json` undercounts voicing: $0.294 recorded against ~$0.735 for its 6,684 characters at $0.11/1k. Most likely an interrupted voicing run whose finished chunks were never billed in `pipeline_steps` (known gap in how interrupted runs are billed). Not fixed here.
+**Consequences.** `solution.md` §3.7, the TL;DR bullet and the monthly-cost sentence now use these medians; ElevenLabs figures keep their "(estimate)" label. Real voicing time and cost are still unmeasured on this key and should be re-checked once there is ElevenLabs credit.
