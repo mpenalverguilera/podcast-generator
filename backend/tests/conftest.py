@@ -70,7 +70,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def _fast_test_isolation(tmp_path, monkeypatch, request):
-    """Two things every test gets for free:
+    """Three things every test gets for free:
 
     1. Its own `data_dir` instead of the real `backend/data/` -- test episode
        ids come from the same autoincrement sequence as real dev/demo
@@ -84,8 +84,13 @@ def _fast_test_isolation(tmp_path, monkeypatch, request):
        produces a playable file. A test marked `@pytest.mark.real_ffmpeg`
        (one, in test_assemble.py) opts out so the production ffmpeg command
        stays covered somewhere.
+    3. `script_trace_dir` forced to None (D-60's debug trace is off), so a
+       developer's local `.env` with SCRIPT_TRACE_DIR set can't leak into
+       tests or make them write into the real trace directory. A test that
+       wants tracing sets it itself.
     """
     monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    monkeypatch.setattr(get_settings(), "script_trace_dir", None)
     if request.node.get_closest_marker("real_ffmpeg") is None:
         monkeypatch.setattr(assemble, "_LOUDNORM_FILTER", "anull")
 
