@@ -138,7 +138,7 @@ flowchart TD
 | `gpt-6-luna` (reasoning none / low / medium) | 0.91–0.94 | 0.75 | ~$0.009 | About one wrong story in four; more reasoning didn't help |
 | **`gpt-6-sol`, reasoning none** | 0.99–1.00 | 1.00 | ~$0.18 | **Chosen** |
 
-\* For 60 candidates. Real episodes score about 120 pairs, which is why ranking costs about $0.28 ([section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)).
+\* For 60 candidates. Real episodes score about 80 pairs (53–93), which is why ranking costs about $0.28 ([section 3.7](#37-what-an-episode-costs-and-how-long-it-takes)).
 
 Jev was partly an excuse to try something new, and partly the ideal tool for the job: a small model built for exactly this kind of typed yes/no/score question. It won on quality, speed and cost, and lost on availability. Sol costs about 20× Luna, and I accepted that because selection precision is the number the listener feels.
 
@@ -194,14 +194,16 @@ For a 10-minute target on the current pipeline (median of 4 measured episodes; r
 |---|---|---|---|
 | Planning | OpenAI `gpt-6-luna` | $0.0002 | 4 s (3–4) |
 | Fetching (~11 searches) | Exa | $0.063 ($0.042–0.070) | 8 s (6–10) |
-| Ranking (~120 pairs, 8 in parallel) | OpenAI `gpt-6-sol` | $0.279 ($0.179–0.310) | 4 s (2–5) |
+| Ranking (~80 pairs, 8 in parallel) | OpenAI `gpt-6-sol` | $0.279 ($0.179–0.310) | ~20 s (12–22) **(estimate)** |
 | Extracting | Exa | $0.005 | 1 s |
 | Scripting, including the fact-check | OpenAI `gpt-6-sol` + `gpt-6-luna` | $0.212 ($0.158–0.233) | 330 s (220–658) |
 | Voicing (~6,500 characters) | ElevenLabs `eleven_v3` | $0.715 **(estimate)** | ~44 s **(estimate)** |
 | Assembling | local ffmpeg | $0 | 15 s |
-| **Total** | | **$1.27** | **≈ 404 s (≈ 7 min)** |
+| **Total** | | **$1.27** | **≈ 420 s (≈ 7 min)** |
 
-**By provider:** ElevenLabs ≈ 56% (estimate), OpenAI ≈ 39%, Exa ≈ 5%. **By time:** scripting including the fact-check ≈ 81%, voicing ≈ 11% (estimate), everything else ≈ 8%.
+**By provider:** ElevenLabs ≈ 56% (estimate), OpenAI ≈ 39%, Exa ≈ 5%. **By time:** scripting including the fact-check ≈ 79%, voicing ≈ 10% (estimate), everything else ≈ 11%.
+
+**Correction on ranking time.** The ranking latency was under-reported: the stage recorded the slowest single call (about 4 s) instead of its wall-clock time, and the runner preferred that number over its own timer. The table now shows the wall time, estimated as the sum of the stored per-call latencies ÷ 8 workers (12–22 s across the 4 episodes). The fix is to time the stage's wall clock, as the voice stage already does; the conclusion that scripting dominates still holds.
 
 *Sources:* medians of 4 measured 10-minute episodes (13747, 13748, 13749, 13750; `eval/results/cost_timing_2026-09-30.md`), stopped after scripting so ElevenLabs was not called, plus the measured voicing benchmark in D-56 (chunks of about 40 characters per second, up to 4 in parallel). OpenAI and Exa figures are exact, from the providers' own usage counts. ElevenLabs dollars are **characters × $0.11 per 1,000**, an estimate because the real plan price isn't visible with this key; the character count itself is exact (the same count ElevenLabs reports in its `character-cost` header). The slowest scripting run (658 s) had one section-draft call that stalled for about 9 minutes, so the range is wide while the median is stable.
 
