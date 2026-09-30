@@ -1,9 +1,5 @@
 # Personal Podcast Generator — solution overview, architecture and trade-offs
 
-> **AUTHOR NOTES — delete this box before submitting.**
-> - `sample.meta.json` records $0.294 for voicing, but the sample's transcript is 6,684 characters, which is $0.735 at the configured $0.11/1k. The most likely cause is a voicing run interrupted by a restart: chunks finished before it are on disk but their cost was never recorded (a known gap in how interrupted runs are billed). **[CONFIRM]** that this matches what happened, or re-export the meta.
-> - Places where I (Claude) inferred your reasoning are marked **[CONFIRM]**.
-
 ## Contents
 0. [TL;DR](#0-tldr)
 1. [Product and scope](#1-product-and-scope)
@@ -146,7 +142,7 @@ flowchart TD
 
 Jev was partly an excuse to try something new, and partly the ideal tool for the job: a small model built for exactly this kind of typed yes/no/score question. It won on quality, speed and cost, and lost on availability. Sol costs about 20× Luna, and I accepted that because selection precision is the number the listener feels.
 
-Two honest caveats. **n = 60 with one annotator** is small: at that size only large differences are distinguishable from noise, so I used margins fixed in advance rather than fine-grained comparisons. And **I overrode my own rule once.** When I added stale detection, Sol flagged 6 of 61 fresh rows as stale (3 were junk the keep gate drops anyway, 3 were good stories). That failed my zero-false-positive gate. I shipped it anyway because it caught 13 of 15 stale rows, including both real stale stories that had reached an episode. **[CONFIRM: say in your own words why the trade was worth it.]**
+Two honest caveats. **n = 60 with one annotator** is small: at that size only large differences are distinguishable from noise, so I used margins fixed in advance rather than fine-grained comparisons. And **I overrode my own rule once.** When I added stale detection, Sol flagged 6 of 61 fresh rows as stale (3 were junk the keep gate drops anyway, 3 were good stories). That failed my zero-false-positive gate. I shipped it anyway because it caught 13 of 15 stale rows, including both real stale stories that had reached an episode.
 
 ### 3.4 Extracting
 
@@ -292,6 +288,6 @@ In the order I would tackle them:
 
 ## 8. How I built it
 
-I built this with Claude Code, in phases, each with a plan, acceptance checks, tests and one commit (`docs/phases/`). Every non-trivial decision went into a decision log (`docs/DECISIONS.md`, D-01 to D-74): context, decision, alternatives rejected, consequences. This document is written from it. For choices with real consequences I set the rules before looking at results (the classifier and grounding evals). I reviewed the code and the docs against each other along the way, which caught several real bugs, for example an episode that could stay stuck forever if an API key was missing. The AI wrote most of the code; the decisions, the evals and the trade-offs above are mine, and the log shows how each one was reached. **[CONFIRM / rewrite in your own words.]**
+I built this with Claude Code, in phases, each with a plan, acceptance checks, tests and one commit (`docs/phases/`). Every non-trivial decision went into a decision log (`docs/DECISIONS.md`, D-01 to D-74): context, decision, alternatives rejected, consequences. This document is written from it. For choices with real consequences I set the rules before looking at results (the classifier and grounding evals). I reviewed the code and the docs against each other along the way, which caught several real bugs, for example an episode that could stay stuck forever if an API key was missing. The AI wrote most of the code; the decisions, the evals and the trade-offs above are mine, and the log shows how each one was reached.
 
 Tests use fake providers only (257 passing). `docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build` runs the whole app without any API keys.
